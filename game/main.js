@@ -1,4 +1,4 @@
-// HERO TRIAL — milestone 2: the full world (dungeons, giant tree, platinum tools) on top of milestone 1.
+// HERO TRIAL — milestone 3: minions, on top of the world (milestone 2) and tools/stats (milestone 1).
 // Design: DESIGN.md in the repo root. Section numbers below (§) point into it.
 
 // =================================================================== 1. constants & tables
@@ -93,6 +93,18 @@ const ZONES = [
 ]
 const EXTRA_TOOLS = 12                      // random loose tools at match start, besides the scene's tool markers
 
+// minions (§8.7), by vox number. speed in blocks/frame, aggro in blocks; atk: how it fights
+const MINIONS = {
+  5:  { name: 'SLIME',    hp: 10, dmg: 3,  speed: 0.03,  aggro: 6,  scale: 0.8, atk: 'hop',   drops: [1, 1], col: 11 },
+  6:  { name: 'BAT',      hp: 8,  dmg: 4,  speed: 0.05,  aggro: 8,  scale: 0.6, atk: 'fly',   drops: [1, 1], col: 2 },
+  7:  { name: 'GOBLIN',   hp: 18, dmg: 5,  speed: 0.045, aggro: 8,  scale: 1.0, atk: 'swing', drops: [1, 2], col: 11 },
+  8:  { name: 'SKELETON', hp: 25, dmg: 7,  speed: 0.04,  aggro: 10, scale: 1.0, atk: 'swing', drops: [2, 2], col: 7 },
+  9:  { name: 'GOLEM',    hp: 60, dmg: 12, speed: 0.025, aggro: 6,  scale: 1.5, atk: 'swing', drops: [3, 4], col: 5 },
+  10: { name: 'MUSHROOM', hp: 14, dmg: 4,  speed: 0,     aggro: 4,  scale: 0.8, atk: 'puff',  drops: [1, 1], col: 8 },
+}
+const SURFACE_MINIONS = 30                  // alive on the surface at once
+const MINION_RESPAWN = 600                  // frames before a dead surface minion comes back somewhere else
+
 // hero colors: palette color 8 on the head is recolored per hero (§12.4)
 const HERO_COLORS = [8, 12, 11, 10]
 
@@ -114,7 +126,7 @@ let scene, WORLD, QUADS, PROPMAP
 let props = []                              // every prop record
 let grid = {}                               // spatial grid: bucket key -> props in it (8 x 8 blocks)
 let propAt = {}                             // cellKey -> prop (one prop per cell; big props fill several keys)
-let spawns = [], chestSpots = []
+let spawns = [], chestSpots = [], minionSpots = []
 
 const cellKey = (x, y, z) => x + WORLD_W * (y + WORLD_H * z)
 const bucketKey = (x, z) => (x >> 3) + 16 * (z >> 3)
@@ -140,12 +152,16 @@ function buildWorld() {
   QUADS = scene.maps
   PROPMAP = map_new(WORLD_W, WORLD_H, WORLD_D)   // invisible: never drawn, only collided with (§8.3)
   WORLD = QUADS.concat([PROPMAP])
-  props = []; grid = {}; propAt = {}; spawns = []; chestSpots = []; pickups = []
+  props = []; grid = {}; propAt = {}; spawns = []; chestSpots = []; pickups = []; minions = []; minionSpots = []
 
   // scene markers (§8.4)
   for (let [v, x, y, z, yaw] of scene.things) {
     if (v == V.head) spawns.push([x, y + R, z])
     else if (v == V.chestSpot) chestSpots.push([flr(x), flr(y + 0.01), flr(z)])
+    else if (MINIONS[v]) {
+      if (y < 14) addMinion(v, x, y, z, 3, true)                // dungeon garrison: level 3, never respawns
+      else minionSpots.push([v, x, y, z])                          // a surface spawn point
+    }
     else if (TOOL_OF_VOX[v]) {
       let plat = mgetw(QUADS[quadOf(x, z)], x, y - 0.5, z)[0] == T.gold         // on a gold block: platinum
       addPickup('tool', x, y, z, { t: TOOL_OF_VOX[v], plat })
@@ -176,6 +192,13 @@ function buildWorld() {
   for (let i = 0, tries = 0; i < EXTRA_TOOLS && tries < 200; tries++) {
     let s = randomSpot(8, 8, 119, 119)
     if (s) { addPickup('tool', s[0] + 0.5, s[1], s[2] + 0.5, { t: 1 + flr(rnd(9)), plat: false }); i++ }
+  }
+
+  // surface minions on random spawn points
+  let spots = minionSpots.slice().sort(() => rnd(1) - 0.5)
+  for (let i = 0; i < min(SURFACE_MINIONS, spots.length); i++) {
+    let [v, x, y, z] = spots[i]
+    addMinion(v, x, y, z, surfaceLevel(x, z), false)
   }
 
   // a few chests to start (§8.4)
@@ -316,7 +339,7 @@ function makeHero(i, pos) {
     pressT: [99, 99], chordLock: false,     // frames since each button went down; jump-chord latch
     holdT: [0, 0], near: null,              // tool pickup: frames held near a tool, the tool in range
     gained: [0, 0, 0, 0, 0, 0, 0, 0],       // HUD flash per stat
-    broken: 0, collected: 0,
+    broken: 0, collected: 0, kills: 0,
     ctrl: { sx: 0, sy: 0, b: [false, false], bp: [false, false] },
     brain: { goal: null, t: 0 } }
 }
@@ -488,6 +511,13 @@ function strike(h, k, mulIn) {
       if (dmg >= 15) big = true
     }
   }
+  // minions
+  for (let m of minions) {
+    if (!m.alive || !inArc(m.x, m.y, m.z, m.r)) continue
+    let dmg = tl.dmg * mul * mm('flesh') * (tl.flesh || 1)
+    hurtMinion(m, dmg, h); hits++
+    if (dmg >= 15) big = true
+  }
   // other heroes
   for (let o of heroes) {
     if (o === h || o.koT > 0 || o.iT > 0) continue
@@ -538,7 +568,7 @@ function hurtHero(o, raw, from) {
     let dx = o.x - from.x, dz = o.z - from.z, m = sqrt(dx * dx + dz * dz) || 1
     let kb = 0.15 * (1 + dmg / 20)
     o.vx += dx / m * kb; o.vz += dz / m * kb; o.vy = 0.08; o.grounded = false
-    spillPowerups(o, 1)                     // City Trial: every hero hit knocks one out (§7.4)
+    if (from.stats) spillPowerups(o, 1)     // City Trial: every hit from a hero knocks one out (§7.4)
   }
   sfx(S.hurt)
   if (o.hp <= 0) knockOut(o, false)
@@ -579,6 +609,168 @@ function spillPowerups(h, n, at) {
     if (STATS[s] == 'health') h.hp = min(h.hp, maxHP(h.stats.health))
     let q = addPickup('pow', at[0], at[1] + 0.3, at[2], s, true)
     q.vx *= 2; q.vz *= 2
+  }
+}
+
+// =================================================================== 5. minions (§8.7)
+
+let minions = []
+
+function surfaceLevel(x, z) {
+  let l = 1
+  if (rnd(1) < 0.35) l++
+  if (dist([x, z], [HUB[0], HUB[2]]) > 40 && rnd(1) < 0.25) l++
+  return min(3, l)
+}
+
+// y is the height the minion stands on (bats: the height they hover at)
+function addMinion(v, x, y, z, lvl, deep, rec) {
+  let d = MINIONS[v], mult = 1 + 0.5 * (lvl - 1), scale = d.scale * (1 + 0.15 * (lvl - 1))
+  let m = rec || {}
+  Object.assign(m, { v, lvl, deep, x, y: y + 0.35 * scale, z, vx: 0, vy: 0, vz: 0, yaw: rnd(1),
+    hp: d.hp * mult, maxhp: d.hp * mult, dmg: d.dmg * mult, scale, r: 0.35 * scale,
+    home: [x, y + 0.35 * scale, z], alive: true, deadT: 0, atkT: 0, cd: 60, hurtT: 0, hopT: 30,
+    t: flr(rnd(100)), grounded: false, target: null, wgoal: null, wT: 0, growT: 20 })
+  if (!rec) minions.push(m)
+  return m
+}
+
+function minionUpdate(m) {
+  let d = MINIONS[m.v]
+  m.t++
+  if (m.cd > 0) m.cd--
+  if (m.hurtT > 0) m.hurtT--
+  if (m.growT > 0) m.growT--
+
+  // ---- pick a target: the nearest hero in range; keep chasing until it's well out of range
+  if (m.t % 10 == 0 || (m.target && m.target.koT > 0)) {
+    let best = null, bd = m.target && m.target.koT == 0 ? d.aggro * 1.5 : d.aggro
+    for (let h of heroes) {
+      if (h.koT > 0 || abs(h.y - m.y) > 4) continue
+      let dd = dist([h.x, h.z], [m.x, m.z])
+      if (dd < bd) { bd = dd; best = h }
+    }
+    m.target = best
+    if (dist([m.x, m.z], [m.home[0], m.home[2]]) > 16) m.target = null      // leash: go home
+  }
+  let tx, tz, chase = !!m.target
+  if (chase) { tx = m.target.x; tz = m.target.z }
+  else {
+    if (!m.wgoal || m.wT-- <= 0 || dist([m.x, m.z], m.wgoal) < 0.5) {
+      m.wgoal = [m.home[0] + rnd(10) - 5, m.home[2] + rnd(10) - 5]; m.wT = 120 + flr(rnd(120))
+    }
+    ;[tx, tz] = m.wgoal
+  }
+  let dx = tx - m.x, dz = tz - m.z, dd = sqrt(dx * dx + dz * dz) || 1
+  let ux = dx / dd, uz = dz / dd
+  let spd = d.speed * (chase ? 1 : 0.5)
+  let reach = m.r + R + 0.15
+
+  if (d.atk == 'hop') {                                     // slime: hops at you
+    if (m.grounded) {
+      m.vx *= 0.6; m.vz *= 0.6
+      if (--m.hopT <= 0) { m.vy = 0.13 + 0.02 * m.lvl; m.vx = ux * spd * 2.2; m.vz = uz * spd * 2.2; m.hopT = 35 + flr(rnd(25)); m.grounded = false }
+    }
+  } else if (d.atk == 'fly') {                              // bat: flies, bobbing, ignores the ground below
+    let wantY = (chase ? m.target.y + 0.3 : m.home[1]) + sin(m.t * 0.03) * 0.4
+    m.vy = mid(-0.05, (wantY - m.y) * 0.05, 0.05)
+    m.vx = lerp(m.vx, ux * spd, 0.08); m.vz = lerp(m.vz, uz * spd, 0.08)
+  } else if (d.atk == 'swing') {                            // goblin, skeleton, golem: walk up and swing
+    let close = chase && dd < reach + 0.5
+    let go = close || m.atkT > 0 ? 0 : spd
+    m.vx = lerp(m.vx, ux * go, 0.2); m.vz = lerp(m.vz, uz * go, 0.2)
+    if (close && m.cd == 0 && m.atkT == 0) { m.atkT = 16; if (dist([m.x, m.z], [player.x, player.z]) < 12) sfx(S.swing) }
+    if (m.grounded && go && dd > 0.3) {                     // climb 1-block steps like heroes do
+      let px = m.x + ux * (m.r + 0.2), pz = m.z + uz * (m.r + 0.2), fy = flr(m.y - m.r + 0.05)
+      if (solidAt(px, fy + 0.5, pz) && !solidAt(px, fy + 1.5, pz)) { m.vy = 0.15; m.grounded = false }
+    }
+  } else if (d.atk == 'puff') {                             // mushroom: stays put, puffs spores when you're close
+    m.vx *= 0.8; m.vz *= 0.8                                  // (it only moves when knocked back)
+    if (chase && dd < 2.4 && m.cd == 0 && m.atkT == 0) m.atkT = 24
+  }
+
+  // ---- attacks land when the windup ends
+  if (m.atkT > 0 && --m.atkT == 0) {
+    let rad = d.atk == 'puff' ? 2.2 : reach + 0.6
+    for (let h of heroes) if (h.koT == 0 && h.iT == 0 && dist([h.x, h.y, h.z], [m.x, m.y, m.z]) < rad) hurtHero(h, m.dmg, m)
+    if (d.atk == 'puff') for (let i = 0; i < 10 && particles.length < 160; i++) { let a = i / 10; particles.push({ x: m.x, y: m.y + 0.3, z: m.z, vx: cos(a) * 0.06, vy: 0.04, vz: sin(a) * 0.06, c: 14, life: 22, s: 0.12, spark: true }) }
+    m.cd = d.atk == 'puff' ? 90 : 50
+  }
+  // ---- touching: slimes and bats hurt on contact
+  if ((d.atk == 'hop' || d.atk == 'fly') && chase && m.cd == 0) {
+    let h = m.target
+    if (h.iT == 0 && dist([h.x, h.y, h.z], [m.x, m.y, m.z]) < reach) { hurtHero(h, m.dmg, m); m.cd = 40 }
+  }
+
+  // ---- move
+  if (d.atk != 'fly') m.vy = max(m.vy - GRAV, TERMINAL)
+  m.x += m.vx; m.y += m.vy; m.z += m.vz
+  let [x, y, z, nx, ny, nz, g] = mpush(WORLD, m.x, m.y, m.z, m.r)
+  m.x = x; m.y = y; m.z = z
+  m.grounded = g >= 0
+  if (m.grounded && m.vy < 0) m.vy = 0
+  if (abs(m.vx) + abs(m.vz) > 0.005) m.yaw += angdiff(m.yaw, chase ? yaw_to(dx, dz) : yaw_to(m.vx, m.vz)) * 0.15
+  else if (chase) m.yaw += angdiff(m.yaw, yaw_to(dx, dz)) * 0.15
+  if (m.y < -4) { m.alive = false; m.deadT = m.deep ? 0 : MINION_RESPAWN }
+}
+
+// keep minions from stacking on each other
+function separateMinions() {
+  for (let i = 0; i < minions.length; i++) {
+    let a = minions[i]
+    if (!a.alive) continue
+    for (let j = i + 1; j < minions.length; j++) {
+      let b = minions[j]
+      if (!b.alive) continue
+      let dx = b.x - a.x, dz = b.z - a.z, need = a.r + b.r
+      if (abs(dx) > need || abs(dz) > need || abs(a.y - b.y) > need) continue
+      let dd = sqrt(dx * dx + dz * dz) || 0.01, push = (need - dd) * 0.5
+      if (push <= 0) continue
+      a.x -= dx / dd * push; a.z -= dz / dd * push; b.x += dx / dd * push; b.z += dz / dd * push
+    }
+  }
+}
+
+function hurtMinion(m, dmg, from) {
+  m.hp -= dmg
+  m.hurtT = 8
+  m.target = from
+  let dx = m.x - from.x, dz = m.z - from.z, dd = sqrt(dx * dx + dz * dz) || 1
+  let kb = 0.14 / m.scale
+  m.vx += dx / dd * kb; m.vz += dz / dd * kb
+  if (MINIONS[m.v].atk != 'fly') { m.vy = 0.08; m.grounded = false }
+  m.atkT = 0                                                  // a hit interrupts its windup
+  debris(m.x, m.y, m.z, 4, MINIONS[m.v].col, 0.07)
+  if (m.hp <= 0) killMinion(m, from)
+}
+
+function killMinion(m, h) {
+  let d = MINIONS[m.v]
+  m.alive = false
+  m.deadT = m.deep ? 0 : MINION_RESPAWN
+  let n = d.drops[0] + flr(rnd(d.drops[1] - d.drops[0] + 1)) + (m.lvl - 1)   // higher levels drop a bit more
+  for (let i = 0; i < n; i++) dropPowerup(m.x, m.y, m.z)
+  debris(m.x, m.y, m.z, 12, d.col, 0.13)
+  sfx(S.ko)
+  if (h && h.kills != null) h.kills++
+}
+
+// dead surface minions come back after a while, at a spawn point the player can't see
+function respawnMinions() {
+  let alive = 0
+  for (let m of minions) if (m.alive && !m.deep) alive++
+  let [fx, , fz] = dir3(camYaw)
+  for (let m of minions) {
+    if (m.alive || m.deep || alive >= SURFACE_MINIONS) continue
+    if (m.deadT > 0) { m.deadT -= 30; continue }
+    for (let tries = 0; tries < 6; tries++) {
+      let [v, x, y, z] = rnd(minionSpots)
+      let dx = x - player.x, dz = z - player.z
+      if (dx * dx + dz * dz < 24 * 24 && dx * fx + dz * fz > 0) continue     // in view: try another spot
+      addMinion(v, x, y, z, surfaceLevel(x, z), false, m)
+      alive++
+      break
+    }
   }
 }
 
@@ -761,6 +953,9 @@ function _update() {
   playerInput(player)
   for (let i = 1; i < heroes.length; i++) wanderBrain(heroes[i])
   for (let h of heroes) heroUpdate(h)
+  for (let m of minions) if (m.alive) minionUpdate(m)
+  separateMinions()
+  if (frame % 30 == 0) respawnMinions()
   pickupsUpdate()
   particlesUpdate()
   if (frame % 30 == 0) regrowProps()
@@ -780,6 +975,7 @@ function _draw() {
   outline(0, false)
   drawProps()
   for (let h of heroes) if (h.koT == 0 && !(h.iT > 0 && h.iT < 100 && frame % 4 < 2 && h.hurtT == 0)) drawHero(h)
+  drawMinions()
   drawPickups()
   outline()
   drawParticles()
@@ -820,6 +1016,29 @@ function drawProps() {
       if (p.hitT > 0) pal()
       drawn++
     }
+  }
+}
+
+function drawMinions() {
+  let [fx, , fz] = dir3(camYaw), under = player.y < 14
+  for (let m of minions) {
+    if (!m.alive || (m.y < 14) != under) continue
+    let dx = m.x - camPos[0], dz = m.z - camPos[2]
+    if (dx * fx + dz * fz < -2 || dx * dx + dz * dz > DRAW_R * DRAW_R) continue
+    let d = MINIONS[m.v], s = m.scale * (m.growT > 0 ? 1 - m.growT / 22 : 1)
+    // the squash "walk": quicker when chasing; a slime squashes on landing, a windup stretches tall
+    let k = m.target ? 0.12 : 0.06, q = abs(sin(m.t * k))
+    let sy = 1 - 0.15 * q, sxz = 1 + 0.07 * q
+    if (d.atk == 'hop') { sy = m.grounded ? 1 - 0.25 * max(0, 1 - m.hopT / 12) : 1.15; sxz = 2 - sy }
+    if (d.atk == 'fly') { sy = 1; sxz = 1 + 0.25 * sin(m.t * 0.4) }
+    if (m.atkT > 0) { sy = 1.2; sxz = 0.9 }
+    let flash = m.hurtT > 0 || (m.atkT > 0 && m.atkT % 4 < 2)
+    if (flash) for (let i = 0; i < 32; i++) pal(i, 7)
+    if (m.lvl >= 3) outline(8, false)                          // level 3: red outline
+    let base = d.atk == 'fly' ? m.y - 0.5 * s : m.y - m.r
+    vox(m.v, m.x, base, m.z, 0, m.yaw, 0, s * sxz, s * sy, s * sxz)
+    if (m.lvl >= 3) outline(0, false)
+    if (flash) pal()
   }
 }
 

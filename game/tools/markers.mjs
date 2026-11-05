@@ -1,7 +1,7 @@
 // Rebuilds scene 0's markers from lib/world.mjs (spawns and hand-placed chests are kept).
 // Run: node game/tools/markers.mjs   -- only while the scene is generated; once markers are
 // placed by hand in the IDE, stop running this or it will replace them.
-import { column, features } from '../lib/world.mjs';
+import { column, features, minionSpots } from '../lib/world.mjs';
 import fs from 'fs';
 const p = new URL('../scenes.json', import.meta.url).pathname;
 const s = JSON.parse(fs.readFileSync(p));
@@ -19,6 +19,6 @@ const chestSpots = [[30, 80], [12, 112], [50, 100], [24, 70], [86, 94], [112, 11
 s[0].vox = keep.concat(tools.map(([v, x, z]) => at(v, x, z)), chestSpots.map(([x, z]) => at(42, x, z)));
 // platinum sword on the tower top (gold tile under it, set in world.mjs)
 s[0].vox.push({ v: 16, pos: [108.5, 50, 90.5], yaw: 0 });
-for (const [v, x, y, z] of features()) s[0].vox.push({ v, pos: [x + 0.5, y, z + 0.5], yaw: [0, 0.25, 0.5, 0.75][(x * 7 + z) % 4] });
+for (const [v, x, y, z] of features().concat(minionSpots())) s[0].vox.push({ v, pos: [x + 0.5, y, z + 0.5], yaw: [0, 0.25, 0.5, 0.75][(x * 7 + z) % 4] });
 fs.writeFileSync(p, JSON.stringify(s, null, 2));
 console.log(s[0].vox.length, 'markers');

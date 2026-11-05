@@ -350,8 +350,8 @@ Single vox, no limbs. Animation is a `sy` squash: `sy = 1 − 0.15·|sin(t·k)|`
 
 - Contact damage with a 40-frame per-target cooldown; goblins/skeletons/golems instead "swing" (flash white for 10 frames, then hit in a 1.2-block radius).
 - Minions don't attack props.
-- **Drops**: slime 1, bat 1, goblin 1–2, mushroom 1, skeleton 2, golem 3–4.
-- **Levels**: level 1–3; level multiplies HP and dmg by `1 + 0.5·(lvl−1)` and scale by `1 + 0.15·(lvl−1)`. Dungeons spawn level 3.
+- **Drops**: slime 1, bat 1, goblin 1–2, mushroom 1, skeleton 2, golem 3–4, plus 1 per level above 1.
+- **Levels**: level 1–3; level multiplies HP and dmg by `1 + 0.5·(lvl−1)` and scale by `1 + 0.15·(lvl−1)`. Dungeons spawn level 3. Surface: level 2 at 35 %, and a further +1 at 25 % more than 40 blocks from the hub. Level 3 minions have a red outline.
 - **Population**: ~30 alive on the surface at once; when one dies, a new one spawns after 10 s at a minion marker of its zone that is out of the player's view. Dungeon minions do not respawn.
 - Physics: same `mpush` as heroes (bats skip gravity). No pathfinding; they steer straight at the target and hop 1-block steps.
 
@@ -641,7 +641,7 @@ Rule of thumb: game objects are plain objects in arrays (`heroes`, `minions`, `p
 | 0 | **Spike**: 4 placeholder quadrant maps in a scene, `PROPMAP`, ~800 placeholder props, hero walking/climbing/hop/flap/pound, camera. | Hero runs around the whole world at 60 fps with props drawn and collidable.  **Done 2026-11-05** (see §18). |
 | 1 | **Swinging**: two hands, all 10 tools, unified hit test, prop damage/breaking/regrow, drops, powerups, all 8 stats wired. | Can farm stats from props and feel the stats change. **Done 2026-11-05** (see §18). |
 | 2 | **World**: generated drafts of the four quadrants, hub, tower, four dungeons; markers, tile rules, scatter zones, chest top-ups. | Every area exists, is reachable, and is full of props. **Done 2026-11-05** (see §18). |
-| 3 | **Minions**: six types, spawning, levels, drops. | Minions fight back; dungeons are dangerous. |
+| 3 | **Minions**: six types, spawning, levels, drops. | Minions fight back; dungeons are dangerous. **Done 2026-11-05** (see §18). |
 | 4 | **AI heroes**: brain, hero-vs-hero combat. | Three rivals visibly grow stronger over 5 minutes. |
 | 5 | **Match flow**: all states, timer, challenge select, five challenges, results. | A full match plays start to finish. |
 | 6 | **Persistence**: best times, accomplishment board and checks. | Times and accomplishments survive a reload. |
@@ -715,3 +715,13 @@ Not yet: AI heroes still only wander (milestone 4), so they never fight back; th
 - `game/tools/markers.mjs` rebuilds scene 0's markers from `lib/world.mjs`. Stop using it once markers are placed by hand in the IDE.
 
 Tested headless with a waypoint walker: every dungeon walked room to room; all four stairs climbed from the bottom to the surface; the well drop; the giant tree stair to its platform; the tower stair to the top; the lava crossing, walking and jumping; a one-minute soak run with no errors.
+
+### Milestone 3 (2026-11-05)
+
+- Six minion types with models (vox 5–10) and the §8.7 numbers: slimes hop at you, bats fly and bob toward you (both hurt on touch), goblins/skeletons/golems walk up, flash during a 16-frame windup and swing, mushrooms stay put and puff spores within 2.4 blocks.
+- 18 level-3 garrison minions in the dungeons (never respawn); 75 surface spawn points (from `minionSpots()` in `lib/world.mjs`), 30 surface minions alive at once; a dead one comes back after 10 s at a spawn point outside the player's view.
+- Minions chase the nearest hero in aggro range, keep chasing out to 1.5× that range, and give up 16 blocks from home. A hit interrupts their windup and knocks them back (big ones less). They don't stack.
+- Minion hits don't knock powerups out of heroes (only hero hits do); knockouts from minions spill 30 % as usual.
+- Squash animation per type: chase speed, slime landing squash, bat wing flutter, windup stretch.
+
+Tested headless: each type hurts an idle hero (or knocks it out); each dies to a sword; the castle dungeon's level-3 skeletons knock out a 0-stat hero twice in 30 s, trade evenly at 5 in every stat, and lose at 10 in every stat with no knockouts.

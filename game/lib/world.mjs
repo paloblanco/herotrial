@@ -303,8 +303,37 @@ export function features() {
     // village dungeon
     [51, 20, F, 42], [51, 28, F, 48], [51, 22, F, 49], [51, 29, F, 41], [42, 46, F, 10],
     [56, 41, F, 9], [56, 55, F, 39], [71, 54, F, 51],
+    // dungeon minions (level 3, never respawn): 5 slime, 6 bat, 7 goblin, 8 skeleton, 9 golem, 10 mushroom
+    [6, g.x - 3, F + 2, fz - 5], [6, g.x + 3, F + 2, fz - 8], [6, g.x + 20, F + 2, fz - 5],
+    [10, g.x + 33 - 10, F, fz - 11], [10, g.x + 2, F, fz - 25],
+    [8, 75, F, 105], [8, 95, F, 87], [8, 109, F, 102], [8, 112, F, 107],
+    [9, 100, F, 38], [9, 106, F, 16], [9, 112, F, 20], [6, 104, F + 2, 24], [6, 90, F + 2, 20],
+    [5, 50, F, 44], [5, 46, F, 12], [5, 22, F, 44], [5, 27, F, 47],
     // dig spots hidden on the surface
     [51, 34, 20, 26], [51, 12, column(12, 84).h, 84], [51, 90, column(90, 52).h, 52], [51, 60, 20, 36],
   ];
   return list;
+}
+
+// Surface minion spawn points: [vox, x, standY, z], on a jittered grid per region, away from paths,
+// the hub and buildings. Region mixes: forest goblin/slime/bat/mushroom, castle skeleton/goblin,
+// village goblin/slime, mountains golem/slime.
+const MIX = [[7, 5, 6, 10, 5, 7], [8, 7, 8, 7], [7, 5, 5, 7], [9, 5, 5, 9]];
+const BLOCKED = [[89, 103, 102, 115], [102, 84, 115, 97], [7, 99, 25, 113], [7, 25, 18, 37], [9, 45, 41, 55],
+  [43, 13, 54, 21], [43, 29, 51, 37], [47, 45, 53, 51], [9, 9, 41, 23], [19, 29, 39, 41]];
+export function minionSpots() {
+  const out = [];
+  for (let q = 0; q < 4; q++) {
+    const ox = (q % 2) * 64, oz = q < 2 ? 64 : 0;
+    let i = 0;
+    for (let gz = 6; gz < 60; gz += 11) for (let gx = 6; gx < 60; gx += 11) {
+      const x = ox + gx + Math.floor(hash(gx, gz, 40 + q) * 7), z = oz + gz + Math.floor(hash(gx, gz, 50 + q) * 7);
+      const c = column(x, z);
+      if (!c || onPath(x, z) || Math.abs(x - 63.5) < 14 && Math.abs(z - 63.5) < 14) continue;
+      if (BLOCKED.some(([a, b, c2, d]) => x >= a && x <= c2 && z >= b && z <= d)) continue;
+      if (q == 1 && (x == 82 || x == 120 || z == 82 || z == 120)) continue;
+      out.push([MIX[q][i++ % MIX[q].length], x, c.h, z]);
+    }
+  }
+  return out;
 }
