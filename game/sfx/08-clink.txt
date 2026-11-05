@@ -1,0 +1,4 @@
+name clink
+speed 1 loop 0 0
+52 4 3 0
+50 4 2 5

@@ -119,13 +119,13 @@ All in blocks and frames (60 updates/s). Hero is a ball of radius **0.4**, cente
 
 ### 5.1 Camera
 
-Chase camera, kart-style. State: `camYaw`, `camPitch` (default 0.06), `camDist` (default 5), `idle` counter.
+Chase camera, kart-style. State: `camYaw`, `camPitch` (default 0.08), `camDist` (default 3.8), `idle` counter.
 
 1. **Manual input** (`mouse_delta`, `stick(1)`): rotates `camYaw`/`camPitch` directly; sets `manualHold = 60` frames during which auto-follow is off.
 2. **Moving**: `camYaw += angdiff(camYaw, yaw) × 0.08 × fwd`, where `fwd = max(0, −sy)` is the forward part of the stick. Aggressive follow while running forward; strafing or backing up doesn't swing the camera, so holding sideways never walks you in circles.
 3. **Stopped**: wait 30 frames, then `camYaw += angdiff(camYaw, yaw) × 0.015` (slow swing in behind).
 4. **Occlusion**: `mray` from hero toward camera on the quadrant maps (not props); pull the camera in to the hit (min 1.2).
-5. `cam_orbit([x, y + 0.8, z], camYaw, -camPitch, camDist)`.
+5. `cam_orbit([x, y + 0.6, z], camYaw, -camPitch, camDist)`.
 
 Movement is camera-relative, using the third-person demo's formula.
 
@@ -492,13 +492,13 @@ The cart is built from scratch with its own assets (not the Starter kit), as tex
 | 3 | Hand |
 | 4 | Foot |
 | 5–15 | Minions (6 types, room for 5 more) |
-| 16–31 | Tools 1–9 (flat "sprite" style), room for 7 more. Bare hand has no model. |
-| 32–39 | Powerup icons, one per stat |
+| 16–31 | Tools 1–9 as 16 sword, 17 hammer, 18 axe, 19 spear, 20 pocket knife, 21 whip, 22 mace, 23 shovel, 24 hoe (flat sprites pointing along +y, pivot at the grip). Bare hand has no model. |
+| 32–39 | Powerup icons, in stat order: speed, strength, health, defense, frequency, reach, agility, jump |
 | 40 | Heart |
 | 41 | Race flag |
 | 42 | Chest-spot marker (editor only, never drawn) |
 | 43–47 | Effects (spark, star, debris) |
-| 48–127 | **Props** (assigned so far: 48 grass tuft, 52–53 rocks, 57–58 small trees, 59 log, 60 crate, 62 bush, 63 corn, 64 pumpkin, 70 wood chest): each kind from §8.2 plus variants (e.g. 48 grass tuft a, 49 grass tuft b, 50 rock a, 51 rock b, …). The `PROPS` table maps vox number → kind, so a marker of any variant is understood. Small trees are 8³ models drawn at scale 1.5. |
+| 48–127 | **Props** (assigned: 48–49 grass tufts, 50 dirt mound, 51 dig spot, 52–53 rocks, 54 boulder, 55 stone block, 56 brick pile, 57–58 small trees, 59 log, 60 crate, 61 leaf pile, 62 bush, 63 corn, 64 pumpkin, 65 berry bush, 66 sprout, 67 sand pile, 68 snowball, 69 shingle stack, 70 wood chest, 71 stone chest, 72 mossy chest, 73 crystal, 74 gold block): each kind from §8.2 plus variants (e.g. 48 grass tuft a, 49 grass tuft b, 50 rock a, 51 rock b, …). The `PROPS` table maps vox number → kind, so a marker of any variant is understood. Small trees are 8³ models drawn at scale 1.5. |
 | 128–255 | Free |
 
 Platinum tools reuse the tool models with a gold `pal()` swap. Big props (boulder) are drawn from an 8³ model at scale 2.
@@ -635,7 +635,7 @@ Rule of thumb: game objects are plain objects in arrays (`heroes`, `minions`, `p
 | # | Milestone | Done when |
 |---|---|---|
 | 0 | **Spike**: 4 placeholder quadrant maps in a scene, `PROPMAP`, ~800 placeholder props, hero walking/climbing/hop/flap/pound, camera. | Hero runs around the whole world at 60 fps with props drawn and collidable.  **Done 2026-11-05** (see §18). |
-| 1 | **Swinging**: two hands, all 10 tools, unified hit test, prop damage/breaking/regrow, drops, powerups, all 8 stats wired. | Can farm stats from props and feel the stats change. |
+| 1 | **Swinging**: two hands, all 10 tools, unified hit test, prop damage/breaking/regrow, drops, powerups, all 8 stats wired. | Can farm stats from props and feel the stats change. **Done 2026-11-05** (see §18). |
 | 2 | **World**: generated drafts of the four quadrants, hub, tower, four dungeons; markers, tile rules, scatter zones, chest top-ups. | Every area exists, is reachable, and is full of props. |
 | 3 | **Minions**: six types, spawning, levels, drops. | Minions fight back; dungeons are dangerous. |
 | 4 | **AI heroes**: brain, hero-vs-hero combat. | Three rivals visibly grow stronger over 5 minutes. |
@@ -678,3 +678,23 @@ Known issues:
 - **Map seams**: `outline(0)` draws a line where two quadrant maps meet, so the hub and the paths along x = 64 and z = 64 show a straight black line. Options: an engine change so maps can share one outline group, drawing maps without outlines, or hiding the seams under walls/paths.
 - Movement at 0 Speed feels slow (3.3 blocks/s); tune after stats are collectable.
 - Assets are placeholders.
+
+### Milestone 1 (2026-11-05)
+
+Feedback from milestone 0 applied: camera closer (distance 3.8, aimed lower), walk cycle 50 % slower, maps drawn **without outlines** (props, heroes and pickups keep their outer outline), and a much bigger swing: windup pose, body lunge and twist, head squash, a hero shake while the swing lands, a fat trail across the whole arc at the tool's real reach, an impact burst at the arc's end, a small camera kick, and hit-stop (`freeze`) when something is hit.
+
+New:
+- All 10 tools with the §7.1 numbers, platinum versions (gold palette, ×1.5 dmg, ×1.2 reach, ×0.8 cooldown); tools carried, swung and lying on the ground as billboards.
+- The unified arc hit test (§7.3) against props, heroes and powerups; damage types × materials (§7.2); stat effects on damage, cooldown, reach and arc.
+- Props: hit flash and wobble, debris, breaking, drops, regrowth when no hero is near, chests appearing at 16 chest-spot markers every 20 s (max 8). All prop kinds from §8.2 have models; boulders are 2 × 2 × 2.
+- Powerups: 60 at the start plus 1 every 2 s (max 120), pop out of broken props, bounce, rest, blink, vanish after 40 s; hearts (4 %).
+- Tools: 14 tool markers + 12 random + a platinum sword on a gold pedestal at the tower top; hold O/X 24 frames to pick up (fill bar), taps always swing.
+- HP and Defense; hero hits knock one powerup out; knockouts spill 30 % of powerups and drop a random tool; respawn at the hub after 1 s with 2 s of blinking i-frames. Lava hurts.
+- Ground pound strikes with both hands and also hits the prop it lands on.
+- HUD: HP bar, 5:00 timer, 8 stats (flash on gain), "+1 STR" popups, hand slots with tool names and cooldown/pickup bars.
+- 12 sounds: jump, swing, hit, break, powerup, tool, hurt, knockout, clink, pound, chest, step.
+- Small props (crops, grass, bushes) are drawn out to 26 blocks, big ones to 40: at most ~300 prop draws, in the farm fields.
+
+Tested headless: bare hands break a rock in ~4.5 s, a hammer in one hit; hold-to-pickup and tap-to-swing; walking into powerups; regrowth after 30 s; a sword hit knocks a powerup out of a rival; a knockout spills 30 % and drops the rival's tool; an 11-block pound smashes the pumpkin it lands on.
+
+Not yet: AI heroes still only wander (milestone 4), so they never fight back; the timer reaches 0:00 and shows TIME! but the challenge select is milestone 5.

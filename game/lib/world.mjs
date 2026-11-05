@@ -98,6 +98,7 @@ export function buildQuadrant(map, ox, oz) {
   const tx0 = 106, tz0 = 88, TOP = 50;
   box(tx0, P, tz0, tx0 + 5, TOP - 1, tz0 + 5, T.stone);
   box(tx0 - 1, TOP - 1, tz0 - 1, tx0 + 6, TOP - 1, tz0 + 6, T.stone);                     // top platform
+  set(tx0 + 2, TOP - 1, tz0 + 2, T.gold);                                                 // gold pedestal: platinum tool
   for (let k = 1; k < 8; k += 2) {                                                        // battlements (the corner where the stair arrives stays open)
     set(tx0 - 1 + k, TOP, tz0 + 6, T.stone); set(tx0 + 6, TOP, tz0 - 1 + k, T.stone);
   }

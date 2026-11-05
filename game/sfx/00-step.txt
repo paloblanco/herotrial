@@ -1,4 +1,0 @@
-name step
-speed 4 loop 0 0
-# pitch wave volume effect
-20 6 2 5

@@ -1,0 +1,6 @@
+name pound
+speed 2 loop 0 0
+12 6 7 3
+9 6 7 3
+7 6 5 3
+6 6 3 5
