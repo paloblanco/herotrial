@@ -201,7 +201,7 @@ Every hittable thing has a **material**. Multiplier = `MAT[type][material]`.
 
 **One hit test for everything.** Heroes, minions, props and powerups are all "hittables" with a position and radius. A target is hit if:
 - horizontal distance ≤ `reach + target.r`,
-- vertical offset from the hero's center is between **−0.6 and +1.2** (shovel: **−1.6** to +1.2),
+- vertical offset from the hero's center is between **−1.1 and +1.2** (shovel: **−2.1** to +1.2), so you can hit things one block below you,
 - the angle to it is within `arc/2` of `yaw`.
 
 Candidates come from a **spatial grid** (4 × 4-block buckets), so only nearby things are tested. A swing hits **every** target in its arc, each once per swing, so big reach and arc builds can mow a whole field. No `mray`/`mgetw` sampling needed.
@@ -513,7 +513,7 @@ A hero is drawn as: head vox at the ball center, hands at ±0.35 to the side and
 
 - **Walk**: feet alternate forward/back `±0.12·sin(walkPhase)`; hands swing opposite.
 - **Airborne**: feet together and down; hands up. **Flap**: hands flap `±0.2·sin(t·0.4)` vertically.
-- **Swing**: the hand moves along the arc on frame 1 and holds for 6 frames, the tool vox drawn at the hand, rotated to point outward.
+- **Swing**: the hand moves along the arc on frame 1 and holds for 6 frames, the tool vox drawn at the hand, rotated to point outward. The tool **stretches along its length to the hand's actual reach** (60 % on the strike frame, 90 % the next, full for 3 frames, then shrinking back), so Reach and long tools are visible.
 
 ### 12.4 Hero colors
 
@@ -642,7 +642,7 @@ Rule of thumb: game objects are plain objects in arrays (`heroes`, `minions`, `p
 | 1 | **Swinging**: two hands, all 10 tools, unified hit test, prop damage/breaking/regrow, drops, powerups, all 8 stats wired. | Can farm stats from props and feel the stats change. **Done 2026-11-05** (see §18). |
 | 2 | **World**: generated drafts of the four quadrants, hub, tower, four dungeons; markers, tile rules, scatter zones, chest top-ups. | Every area exists, is reachable, and is full of props. **Done 2026-11-05** (see §18). |
 | 3 | **Minions**: six types, spawning, levels, drops. | Minions fight back; dungeons are dangerous. **Done 2026-11-05** (see §18). |
-| 4 | **AI heroes**: brain, hero-vs-hero combat. | Three rivals visibly grow stronger over 5 minutes. |
+| 4 | **AI heroes**: brain, hero-vs-hero combat. | Three rivals visibly grow stronger over 5 minutes. **Done 2026-11-05** (see §18). |
 | 5 | **Match flow**: all states, timer, challenge select, five challenges, results. | A full match plays start to finish. |
 | 6 | **Persistence**: best times, accomplishment board and checks. | Times and accomplishments survive a reload. |
 | 7 | **Polish**: art pass, sounds, music, HUD, title, export. | Playable on desktop, gamepad and phone. |
@@ -725,3 +725,14 @@ Tested headless with a waypoint walker: every dungeon walked room to room; all f
 - Squash animation per type: chase speed, slime landing squash, bat wing flutter, windup stretch.
 
 Tested headless: each type hurts an idle hero (or knocks it out); each dies to a sword; the castle dungeon's level-3 skeletons knock out a 0-stat hero twice in 30 s, trade evenly at 5 in every stat, and lose at 10 in every stat with no knockouts.
+
+### Milestone 4 (2026-11-05)
+
+- **Tool stretch**: a swung tool scales along its length out to the hand's reach (Rocco's request), growing over the first two frames of the strike and shrinking back at the end.
+- **AI heroes** (§13): every 15 frames each rival scores what's within 24 blocks on its own level and picks a goal: powerups (10/d), hearts when hurt, better tools (12/d), props (expected drops / distance / swings needed), minions it's strong enough for (more if the minion is after it), weaker heroes within 10 blocks, or fleeing a much stronger hero within 6. Otherwise it wanders its quadrant. It drives the same controls as the player: a virtual stick relative to its own virtual camera (`h.aim`), and button holds (holding its worse hand next to a better tool picks it up). It picks the hand whose tool does the most damage per second against the target's material.
+- Safety: it won't walk toward a spot without ground 1.5 blocks ahead; if it barely moves for 2 s it jumps and drops that goal for 30 s; it gives up on a target it can't reach (wrong height) or hasn't finished 6 s after getting in range.
+- Swings now reach one block below you (−1.1; the shovel −2.1); before, a hero standing on a step couldn't hit crops below it.
+
+Tested headless over 2.5 minutes of trial: no rival fell off the world or got stuck for long; they picked up tools (one took the platinum sword) and ended at 40, 69 and 172 total stats. A stronger rival chased the player, knocked all 4 powerups out of them, and then collected them.
+
+**Balance note for later**: one rival reached 172 total stats by 2:30 by mowing the village farm fields with a sword. The farms (~120 crops, 70–85 % drop chance, 45 s regrowth) plus multi-hit swings are by far the richest source of powerups.

@@ -1,4 +1,4 @@
-// HERO TRIAL — milestone 3: minions, on top of the world (milestone 2) and tools/stats (milestone 1).
+// HERO TRIAL — milestone 4: rival heroes with a brain, on top of minions (3), the world (2) and tools/stats (1).
 // Design: DESIGN.md in the repo root. Section numbers below (§) point into it.
 
 // =================================================================== 1. constants & tables
@@ -341,7 +341,7 @@ function makeHero(i, pos) {
     gained: [0, 0, 0, 0, 0, 0, 0, 0],       // HUD flash per stat
     broken: 0, collected: 0, kills: 0,
     ctrl: { sx: 0, sy: 0, b: [false, false], bp: [false, false] },
-    brain: { goal: null, t: 0 } }
+    aim: 0, brain: { goal: null, think: 0, last: null, black: [], stuckT: 0 } }
 }
 
 // effective stat: the hero's own value plus the held tools' offsets, clamped 0-30 (§6)
@@ -366,7 +366,7 @@ function gainStat(h, i) {
 function heroUpdate(h) {
   if (h.koT > 0) { if (--h.koT == 0) respawnHero(h); return }
   let c = h.ctrl
-  let [fx, , fz] = dir3(h === player ? camYaw : h.yaw)
+  let [fx, , fz] = dir3(h === player ? camYaw : h.aim)       // the stick is relative to a camera; AIs have a virtual one
 
   // ---- tool in pickup range (§4.1)
   h.near = null
@@ -484,7 +484,7 @@ function strike(h, k, mulIn) {
   let tl = toolOf(h, k), plat = h.tools[k] && h.tools[k].plat
   let reach = reachOf(h, k), half = arcOf(h, k) / 2
   let mul = (1 + 0.1 * stat(h, 'strength')) * (plat ? 1.5 : 1) * (mulIn || 1)
-  let lo = tl.low ? -1.6 : -0.6, hits = 0, big = false
+  let lo = tl.low ? -2.1 : -1.1, hits = 0, big = false          // reach a block down (the shovel two)
   let inArc = (x, y, z, r) => {
     let dx = x - h.x, dz = z - h.z, d = sqrt(dx * dx + dz * dz), dy = y - h.y
     if (d > reach + r || dy < lo || dy > 1.2) return false
@@ -881,17 +881,146 @@ function playerInput(h) {
   h.ctrl.bp = [btnp(4), btnp(5)]
 }
 
-// placeholder brain until milestone 4: wander to random points in its home quadrant
-function wanderBrain(h) {
-  let b = h.brain, c = h.ctrl
-  if (!b.goal || b.t-- <= 0 || dist([h.x, h.z], b.goal) < 1.5) {
-    let q = h.i % 4, ox = (q % 2) * 64, oz = q < 2 ? 64 : 0
-    b.goal = [ox + 8 + rnd(48), oz + 8 + rnd(48)]; b.t = 360
+// ---- AI heroes (§13). The brain only writes h.ctrl (a virtual stick and buttons) and h.aim (its virtual
+// camera), the same controls the player has; the shared hero code does the rest.
+
+const AI_THINK = 15                         // frames between decisions
+const AI_SIGHT = 24                         // how far it looks for things to do
+
+// how good a tool is: damage per second, weighted by reach (null = bare hand)
+function toolValue(tl) {
+  let t = TOOLS[tl ? tl.t : 0], v = t.dmg / t.cd * 60 * (0.5 + t.reach * 0.5)
+  return tl && tl.plat ? v * 2.2 : v
+}
+function heroPower(h) { return totalStats(h) + toolValue(h.tools[0]) + toolValue(h.tools[1]) }
+
+// best hand against a material: [hand, damage per swing]
+function bestHand(h, mat) {
+  let best = 0, bd = -1
+  for (let k = 0; k < 2; k++) {
+    let tl = toolOf(h, k), m = 0
+    for (let ty of tl.types) m = max(m, MAT[ty][mat])
+    let d = tl.dmg * m * (h.tools[k] && h.tools[k].plat ? 1.5 : 1) / tl.cd
+    if (d > bd) { bd = d; best = k }
   }
-  let want = yaw_to(b.goal[0] - h.x, b.goal[1] - h.z)
-  c.sx = 0; c.sy = -1
-  h.yaw += angdiff(h.yaw, want) * 0.15
-  c.b = [false, false]; c.bp = [false, false]
+  let tl = toolOf(h, best), m = 0
+  for (let ty of tl.types) m = max(m, MAT[ty][mat])
+  return [best, tl.dmg * m * (1 + 0.1 * stat(h, 'strength'))]
+}
+
+function blacklisted(b, ref) { for (let e of b.black) if (e.ref === ref && e.until > frame) return true; return false }
+
+// score everything nearby and pick a goal: { kind, ref }
+function aiChoose(h) {
+  let b = h.brain, best = null, bs = 0.15
+  let hpf = h.hp / maxHP(h.stats.health), power = heroPower(h)
+  let consider = (kind, ref, x, y, z, score) => {
+    if (score <= bs || abs(y - h.y) > 3 || blacklisted(b, ref)) return
+    best = { kind, ref }; bs = score
+  }
+  for (let q of pickups) {
+    if (q.dead) continue
+    let d = dist([q.x, q.z], [h.x, h.z])
+    if (d > AI_SIGHT) continue
+    if (q.kind == 'pow') consider('pow', q, q.x, q.y + 0.4, q.z, 10 / (d + 1))
+    else if (q.kind == 'heart') consider('pow', q, q.x, q.y + 0.4, q.z, (hpf < 0.6 ? 18 : 3) / (d + 1))
+    else if (q.kind == 'tool' && toolValue(q.tool) > min(toolValue(h.tools[0]), toolValue(h.tools[1])) + 1)
+      consider('tool', q, q.x, q.y + 0.4, q.z, 12 / (d + 1))
+  }
+  let r = AI_SIGHT >> 3
+  for (let bz = max(0, (flr(h.z) >> 3) - r); bz <= min(15, (flr(h.z) >> 3) + r); bz++)
+    for (let bx = max(0, (flr(h.x) >> 3) - r); bx <= min(15, (flr(h.x) >> 3) + r); bx++)
+      for (let p of grid[bx + 16 * bz] || []) {
+        if (!p.alive) continue
+        let k = PROPS[p.kind]
+        if (k.onlyDig && toolOf(h, 0).types.indexOf('dig') < 0 && toolOf(h, 1).types.indexOf('dig') < 0) continue
+        let [cx, cy, cz] = propCenter(p), d = dist([cx, cz], [h.x, h.z])
+        let [, dmg] = bestHand(h, k.mat)
+        if (dmg <= 0) continue
+        let swings = ceil(p.hp / dmg)
+        consider('prop', p, cx, cy, cz, k.drop * (k.n[0] + k.n[1]) / 2 * 8 / (d + 1) / (1 + swings / 4))
+      }
+  if (hpf > 0.4) for (let m of minions) {
+    if (!m.alive) continue
+    let d = dist([m.x, m.z], [h.x, h.z])
+    if (d > AI_SIGHT || power < m.maxhp * 0.5 + m.lvl * 4) continue
+    let dr = MINIONS[m.v].drops
+    consider('minion', m, m.x, m.y, m.z, 6 * ((dr[0] + dr[1]) / 2 + m.lvl - 1) / (d + 1) * (m.target === h ? 2 : 1))
+  }
+  for (let o of heroes) {
+    if (o === h || o.koT > 0) continue
+    let d = dist([o.x, o.z], [h.x, h.z]), op = heroPower(o)
+    if (d > 10) continue
+    if (op > power * 1.25 && d < 6) consider('flee', o, o.x, h.y, o.z, 20 / (d + 1))
+    else if (power >= op * 1.1 && hpf > 0.5) consider('hero', o, o.x, o.y, o.z, (5 + totalStats(o) * 0.2) / (d + 1))
+  }
+  if (!best) {                                // nothing worth doing: wander inside the quadrant it's in
+    let ox = h.x >= 64 ? 64 : 0, oz = h.z >= 64 ? 64 : 0
+    best = { kind: 'wander', ref: { x: ox + 8 + rnd(48), z: oz + 8 + rnd(48) } }
+  }
+  if (!b.goal || b.goal.ref !== best.ref) b.since = frame
+  b.goal = best
+}
+
+function goalAlive(g) {
+  let r = g.ref
+  if (g.kind == 'pow' || g.kind == 'tool') return !r.dead
+  if (g.kind == 'prop' || g.kind == 'minion') return r.alive
+  if (g.kind == 'hero' || g.kind == 'flee') return r.koT == 0
+  return true
+}
+
+function aiBrain(h) {
+  let b = h.brain, c = h.ctrl
+  c.sx = 0; c.sy = 0; c.b = [false, false]; c.bp = [false, false]
+  if (h.koT > 0) { b.goal = null; return }
+  if (b.goal && !goalAlive(b.goal)) { b.goal = null; b.think = 0 }
+  if (--b.think <= 0) { b.think = AI_THINK + flr(rnd(5)); aiChoose(h) }
+
+  // stuck: hardly moved in 2 s while trying to go somewhere -> jump, give up on that goal for 10 s
+  if ((frame + h.i * 40) % 120 == 0) {
+    if (b.last && b.moving && dist([h.x, h.z], b.last) < 1 && b.goal) {
+      b.black.push({ ref: b.goal.ref, until: frame + 600 })
+      b.black = b.black.filter((e) => e.until > frame)
+      b.goal = null; b.think = 0
+      if (h.grounded) { c.b = [true, true]; c.bp = [true, true] }
+      return
+    }
+    b.last = [h.x, h.z]; b.moving = false
+  }
+  let g = b.goal
+  if (!g) return
+  let r = g.ref, tx = r.x, tz = r.z, tr = 0
+  if (g.kind == 'prop') { let pc = propCenter(r); tx = pc[0]; tz = pc[2]; tr = 0.45 * (PROPS[r.kind].size || 1) }
+  if (g.kind == 'minion') tr = r.r
+  if (g.kind == 'hero') tr = R
+  let dx = tx - h.x, dz = tz - h.z, d = sqrt(dx * dx + dz * dz)
+  let go = (yaw) => {                          // walk toward a direction, unless that walks off the world
+    let [fx, , fz] = dir3(yaw)
+    if (!groundAt(h.x + fx * 1.5, h.z + fz * 1.5)) { b.goal = null; return }
+    h.aim = yaw; c.sy = -1; b.moving = true
+  }
+
+  if (g.kind == 'flee') { go(yaw_to(-dx, -dz)); return }
+  if (g.kind == 'wander') { if (d < 1.5) b.goal = null; else go(yaw_to(dx, dz)); return }
+  if (g.kind == 'pow') { go(yaw_to(dx, dz)); return }
+  if (g.kind == 'tool') {
+    if (d > 0.8) { go(yaw_to(dx, dz)); return }
+    let k = toolValue(h.tools[0]) <= toolValue(h.tools[1]) ? 0 : 1    // hold the hand with the worse tool
+    c.b[k] = true
+    return
+  }
+  // something to hit: get in range, face it, hold the best hand
+  let mat = g.kind == 'prop' ? PROPS[r.kind].mat : 'flesh'
+  let [k] = bestHand(h, mat)
+  let range = reachOf(h, k) + tr - 0.15
+  if (d > range) { go(yaw_to(dx, dz)); return }
+  let ty = g.kind == 'prop' ? propCenter(r)[1] : r.y, lo = toolOf(h, k).low ? -2.1 : -1.1
+  if (ty - h.y < lo || ty - h.y > 1.2) { b.black.push({ ref: r, until: frame + 1800 }); b.goal = null; return }   // can't reach it from here
+  if (b.engagedRef !== r) { b.engagedRef = r; b.engaged = frame }     // in range: the give-up clock starts now
+  h.yaw += angdiff(h.yaw, yaw_to(dx, dz)) * 0.35
+  if (abs(angdiff(h.yaw, yaw_to(dx, dz))) < arcOf(h, k) / 2) { c.b[k] = true; if (h.cd[k] == 0) c.bp[k] = true }
+  if (frame - b.engaged > (g.kind == 'prop' ? 360 : 600)) { b.black.push({ ref: r, until: frame + 1800 }); b.goal = null }   // taking too long
 }
 
 // =================================================================== 8. camera (§5.1)
@@ -951,7 +1080,7 @@ function _update() {
   frame++
   if (trialLeft > 0) trialLeft--
   playerInput(player)
-  for (let i = 1; i < heroes.length; i++) wanderBrain(heroes[i])
+  for (let i = 1; i < heroes.length; i++) aiBrain(heroes[i])
   for (let h of heroes) heroUpdate(h)
   for (let m of minions) if (m.alive) minionUpdate(m)
   separateMinions()
@@ -1044,10 +1173,12 @@ function drawMinions() {
 
 const PLAT_PAL = [[5, 9], [6, 10], [7, 23], [4, 25]]          // platinum tools are drawn gold
 
-function drawTool(tl, x, y, z, pitch, yaw, s) {
+// len: optional length along the tool (its model's +y), for stretching a swing out to the hand's reach
+function drawTool(tl, x, y, z, pitch, yaw, s, len) {
   if (!tl) return
   if (tl.plat) for (let [a, b] of PLAT_PAL) pal(a, b)
-  vox(TOOLS[tl.t].vox, x, y, z, pitch, yaw, 0, s || 0.8)
+  s = s || 0.8
+  vox(TOOLS[tl.t].vox, x, y, z, pitch, yaw, 0, s, len || s, s)
   if (tl.plat) pal()
 }
 
@@ -1088,7 +1219,9 @@ function drawHero(h) {
       let endA = h.yaw + dirn * half, [ax, , az] = dir3(endA)
       let arm = st < 4 ? 0.55 : 0.55 - (st - 4) * 0.05
       hx = x + ax * arm; hy = y + 0.05; hz = z + az * arm
-      drawTool(tl, hx, hy, hz, -0.25, endA, 0.9)
+      // the tool stretches out to the hand's reach in two frames, holds, then shrinks back
+      let grow = st <= 1 ? 0.6 : st == 2 ? 0.9 : st < 6 ? 1 : max(0.35, 1 - (st - 5) * 0.16)
+      drawTool(tl, hx, hy, hz, -0.25, endA, 0.9, max(0.5, (reach - arm) * grow))
       let steps = 12, fade = (st - 1) / 9
       for (let j = 0; j < steps; j++) {
         let f = j / (steps - 1)                                // 0 = start of the arc, 1 = end
