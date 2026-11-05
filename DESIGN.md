@@ -1,8 +1,16 @@
 # Hero Trial — Design Document
 
-*A 5-minute roguelike for BLOCKO3D 0.1.0-alpha (with 255 tiles / 256 vox models). Draft 2, 2026-11-05.*
+*A 5-minute roguelike for BLOCKO3D 0.1.0-alpha (with 255 tiles / 256 vox models). Draft 3, 2026-11-05.*
 
-This document is written to be built from. Every system has concrete numbers so it can be coded directly; numbers are first guesses for tuning, not promises. Anything I had to invent or interpret is marked **[assumed]**, and the real questions are collected in §15 for the quiz.
+This document is written to be built from. Every system has concrete numbers so it can be coded directly; numbers are first guesses for tuning, not promises. Design questions were settled in the quiz; the answers are recorded in §15.
+
+**Changes in draft 3 (quiz answers)**
+- **Jump** added: press O + X together (§4.3). Walking off a ledge still hops.
+- **Tool pickup** is a hold, not a tap (§4.1).
+- Challenge select: **exactly 1, or all 3** (§10).
+- Fixed **chest and crop tiles removed**; chests and crops exist only as props (§8.1).
+- **Small breakable tree** prop added (§8.2).
+- Hosting on **GitHub Pages** from this repo (§14.1).
 
 **Changes in draft 2**
 - **The map is fixed.** Map tiles are never broken or changed during play. Everything you smash is a **prop**: a breakable vox object that sits on the map (§8).
@@ -31,7 +39,7 @@ Inspirations: Kirby Air Riders' City Trial (the loop, patches, machines → tool
 | Each `vox()` is one draw. | Props are culled by distance and direction before drawing (§14.4). |
 | 255 tiles, 256 vox models, 32 colors, 64 sounds. | Plenty of room: every fixed tile has a prop twin, plus variants. `pal()` recolors platinum tools, heroes and bosses. |
 | Square 256 × 256 screen, text is 7 × 10 px. | Compact HUD (§11). |
-| Buttons 4 (O) and 5 (X); touch shows a d-pad/analog circle + O + X. | Two hands = two buttons. No jump button (§4.3). `touch_set_mode(1)` for analog. |
+| Buttons 4 (O) and 5 (X); touch shows a d-pad/analog circle + O + X. | Two hands = two buttons; jump is both at once (§4.3). `touch_set_mode(1)` for analog. |
 | `mouse_set_mode(2)`: mouse-look on desktop, finger-drag look on touch; `stick(1)` is the right stick. | Manual camera on every input type. |
 | `vox(..., sx, sy, sz)` scales per axis. | Minion squash animation, prop hit-wobble and big bosses are free. |
 | `freeze(n)` holds the picture for n updates. | Hit-stop on big hits and kills. |
@@ -69,23 +77,28 @@ Pause (Enter/P) is handled by the engine.
 | Input | Grounded | Airborne |
 |---|---|---|
 | Stick / d-pad / arrows | Walk, camera-relative | Air control (reduced, see §5) |
-| **O (btn 4) = left hand** | Tap: pick up nearby tool into left hand, **or** swing left tool. Hold: auto-repeat swings at cooldown rate. | Hold: **flap** (slow fall) |
+| **O (btn 4) = left hand** | Tap: swing left tool. Hold: auto-repeat swings at cooldown rate. Hold near a loose tool: **pick it up**. | Hold: **flap** (slow fall) |
 | **X (btn 5) = right hand** | Same, right hand. | Press: **ground pound** |
+| **O + X together** | **Jump** | — |
 | Mouse (captured) / finger drag / right stick | Rotate camera | Rotate camera |
 
-Pickup rule: on `btnp(hand)`, if a loose tool is within **1.2 blocks** (horizontal) and ±1 vertical, pick up the nearest one into that hand and drop the old tool where the new one was. Otherwise swing. A small "O/X: take SWORD" prompt shows whenever a tool is in range. **[assumed]**
+**Pickup rule**: if a loose tool is within **1.2 blocks** (horizontal) and ±1 vertical, a prompt shows ("hold O/X: take SWORD") with a fill bar. Holding a hand's button for **24 frames** while the tool is still in range picks up the nearest one into that hand, and the old tool drops where the new one was. The first press still swings as usual; once the hold passes 8 frames near a tool, auto-repeat swings stop so the pickup reads clearly.
+
+**Jump chord**: if the second button goes down within **4 frames** of the first, it's a jump (§4.3). The first button's swing still happens (swings are instant, so there is no input delay on normal swings); the second button does not swing.
 
 ### 4.2 Climbing
 
 Walking into a wall that is **exactly 1 block high** climbs it automatically: if `mpush` reports a sideways push while grounded and moving, the cell in front at foot level is solid, and the cell above it is empty, set `vy = 0.15`. Two-block walls stop you. This works on solid props too (you can climb onto a crate), because props live in the collision map.
 
-### 4.3 Ledge hop (the "jump")
+### 4.3 Jump and ledge hop
 
-There is no jump button. When the hero **walks off an edge** (grounded last frame, not grounded now, not already going up), they automatically hop: `vy = jumpVel(J)` (§6). Higher Jump stat = bigger hop.
+- **Jump**: O + X together while grounded (§4.1) → `vy = jumpVel(J)` (§6).
+- **Ledge hop**: when the hero **walks off an edge** (grounded last frame, not grounded now, not already going up), they hop automatically with the same `vy = jumpVel(J)`.
+- Both get bigger with the Jump stat. After either, O and X switch to their air roles (flap, pound).
 
 ### 4.4 Flap (glide)
 
-Holding O in the air caps the fall speed: `vy = max(vy, -glideCap(J))`. Arms flap. No stamina limit **[assumed]**.
+Holding O in the air caps the fall speed: `vy = max(vy, -glideCap(J))`. Arms flap. No stamina limit.
 
 ### 4.5 Ground pound
 
@@ -109,7 +122,7 @@ All in blocks and frames (60 updates/s). Hero is a ball of radius **0.4**, cente
 Chase camera, kart-style. State: `camYaw`, `camPitch` (default 0.06), `camDist` (default 5), `idle` counter.
 
 1. **Manual input** (`mouse_delta`, `stick(1)`): rotates `camYaw`/`camPitch` directly; sets `manualHold = 60` frames during which auto-follow is off.
-2. **Moving**: `camYaw += angdiff(camYaw, yaw) × 0.08` — aggressive follow, but **driven only by the forward part of the input** so holding sideways doesn't make you circle forever **[assumed — see Q4]**.
+2. **Moving**: `camYaw += angdiff(camYaw, yaw) × 0.08 × fwd`, where `fwd = max(0, −sy)` is the forward part of the stick. Aggressive follow while running forward; strafing or backing up doesn't swing the camera, so holding sideways never walks you in circles.
 3. **Stopped**: wait 30 frames, then `camYaw += angdiff(camYaw, yaw) × 0.015` (slow swing in behind).
 4. **Occlusion**: `mray` from hero toward camera on the quadrant maps (not props); pull the camera in to the hit (min 1.2).
 5. `cam_orbit([x, y + 0.8, z], camYaw, -camPitch, camDist)`.
@@ -133,7 +146,7 @@ Eight stats, each an integer **0–30**, start at 0. Each powerup is +1 to one s
 | **Agility** | `traction = 0.08 + 0.006·S`; `arc = toolArc + 0.004·S` turns | 0.08, +0° | 0.26, +43° |
 | **Jump** | `jumpVel = 0.13 + 0.0045·S`; `glideCap = 0.11 − 0.0027·S` | hop ≈ 0.85 b, fall 0.11 | hop ≈ 3.6 b, fall 0.029 |
 
-Raising Health also heals by the same amount. HP does not regenerate otherwise **[assumed]**; a rare **heart** drop restores 25 %.
+Raising Health also heals by the same amount. HP does not regenerate otherwise; a rare **heart** drop restores 25 %. Every powerup is positive (no stat-down patches).
 
 Tool modifiers (e.g. hammer slows you) are applied as **effective stat offsets** (e.g. Speed −6), clamped to 0–30 after adding. One code path, no special cases.
 
@@ -158,7 +171,7 @@ Tool modifiers (e.g. hammer slows you) are applied as **effective stat offsets**
 | 8 | Shovel | 7 | 1.3 | 0.12 | 30 | smash + dig | Its arc also reaches one cell **below** your feet, so it can hit flush-to-the-ground props like dig spots (§8.2) |
 | 9 | Hoe | 3 | 1.3 | 0.33 | 24 | harvest | — |
 
-**Platinum** versions (tools 1–9): dmg ×1.5, reach ×1.2, cd ×0.8, drawn with a gold `pal()` swap and a shimmering outline. Only ~6 per match, in hard-to-reach places (§9).
+**Platinum** versions (tools 1–9): dmg ×1.5, reach ×1.2, cd ×0.8, drawn with a gold `pal()` swap and a shimmering outline. No special effects, just better numbers. Only ~6 per match, in hard-to-reach places (§9).
 
 When a tool has two damage types, it uses whichever multiplier is better against the target.
 
@@ -191,7 +204,7 @@ Every hittable thing has a **material**. Multiplier = `MAT[type][material]`.
 - vertical offset from the hero's center is between **−0.6 and +1.2** (shovel: **−1.6** to +1.2),
 - the angle to it is within `arc/2` of `yaw`.
 
-Candidates come from a **spatial grid** (4 × 4-block buckets), so only nearby things are tested. A swing hits **every** target in its arc **[assumed — see Q11]**; each target once per swing. No `mray`/`mgetw` sampling needed.
+Candidates come from a **spatial grid** (4 × 4-block buckets), so only nearby things are tested. A swing hits **every** target in its arc, each once per swing, so big reach and arc builds can mow a whole field. No `mray`/`mgetw` sampling needed.
 
 **Powerups**: any loose powerup in the arc and reach (× 1.5 for whip) is collected. Walking within 0.7 also collects.
 
@@ -200,7 +213,7 @@ Two hands swinging on the same frame is allowed; each hand has its own cooldown.
 ### 7.4 Combat between characters
 
 - Heroes hit by any hero or minion take damage (§6 Defense), knockback, i-frames.
-- When a hero is hit by **another hero**, they spill **1 powerup** (random stat they have > 0) that pops out as a loose pickup, City Trial style **[assumed]**.
+- Each time a hero is hit by **another hero**, they spill **1 powerup** (random stat they have > 0) that pops out as a loose pickup, City Trial style. The stat drops by 1.
 - Big hits (final damage ≥ 15) trigger `freeze(3)`.
 
 ---
@@ -209,7 +222,7 @@ Two hands swinging on the same frame is allowed; each hand has its own cooldown.
 
 ### 8.1 Fixed map tiles
 
-Every tile from draft 1 remains, as **unbreakable** map tiles. They are scenery and ground; the only gameplay properties left are hazards and a footstep sound group.
+The map is built from **unbreakable** tiles. They are scenery and ground; the only gameplay properties left are hazards and a footstep sound group. Chest and crop tiles were dropped (they'd look breakable but aren't); chests and crops exist only as props.
 
 | id | Tile | Notes |
 |---|---|---|
@@ -218,31 +231,25 @@ Every tile from draft 1 remains, as **unbreakable** map tiles. They are scenery 
 | 3 | rock | mountain faces, boulders that are scenery |
 | 4 | stone (cut) | castle walls |
 | 5 | dungeon brick | |
-| 6 | log | fixed tree trunks |
+| 6 | log | big fixed tree trunks |
 | 7 | planks | village buildings |
-| 8 | leaves | fixed tree crowns |
+| 8 | leaves | big fixed tree crowns |
 | 9 | bush | hedges |
-| 10 | corn | decorative crop rows |
-| 11 | pumpkin | decorative |
-| 12 | berry bush | decorative |
-| 13 | farmland | **auto-sprouts crop props on top** (§8.4) |
-| 14 | sand/path | roads |
-| 15 | snow | mountain tops |
-| 16 | roof | |
-| 17 | wood chest | decoration (e.g. a storeroom) — see Q12 |
-| 18 | stone chest | decoration |
-| 19 | mossy chest | decoration |
-| 20 | bedrock | map floor |
-| 21 | crystal | dungeon walls |
-| 22 | lava | hazard: touching = 10 dmg/s |
-| 23 | gold block | pedestals under platinum tools |
-| 24–255 | free | more tiles as the art grows |
+| 10 | farmland | **auto-sprouts crop props on top** (§8.4) |
+| 11 | sand/path | roads |
+| 12 | snow | mountain tops |
+| 13 | roof | |
+| 14 | bedrock | map floor |
+| 15 | crystal | dungeon walls |
+| 16 | lava | hazard: touching = 10 dmg/s |
+| 17 | gold block | pedestals under platinum tools |
+| 18–255 | free | more tiles as the art grows |
 
 Tile data lives in a small `TILES` table: `{ name, hazard?, sound }`.
 
 ### 8.2 Props (the breakable things)
 
-A **prop** is a vox model sitting on the map, occupying one block cell (or a 2 × 2 × 2 space for big props). Props are what you smash for powerups. Each fixed tile has a **breakable twin** prop, plus a few props with no tile twin.
+A **prop** is a vox model sitting on the map, occupying one block cell (or a 2 × 2 × 2 space for big props). Props are what you smash for powerups. Most fixed tiles have a **breakable twin** prop; chests, crops and small trees are props only.
 
 | Prop (vox) | Twin of tile | Material | HP | Solid? | Drops | Regrows | Where |
 |---|---|---|---|---|---|---|---|
@@ -253,20 +260,21 @@ A **prop** is a vox model sitting on the map, occupying one block cell (or a 2 �
 | Big boulder (2³) | rock | rock | 60 | yes | 100 %, 3–4 | 120 s | mountains |
 | Stone block | stone | stone | 35 | yes | 50 %, 1–2 | 90 s | castle rubble |
 | Brick pile | dungeon brick | stone | 50 | yes | 60 %, 2 | never | dungeons |
+| **Small tree** | — | wood | 20 | yes | 50 %, 1–2 | 60 s | forest, village edges; 1 cell, drawn at scale 1.5 so it stands ~1.5 tall; 2–3 looks |
 | Log | log | wood | 16 | yes | 40 %, 1 | 60 s | forest floor, woodpiles |
 | Crate | planks | wood | 14 | yes | 70 %, 1–2 | 60 s | village, castle |
 | Leaf pile | leaves | plant | 3 | no | 15 %, 1 | 30 s | forest |
 | Bush | bush | plant | 4 | no | 35 %, 1 | 30 s | everywhere |
-| Corn | corn | crop | 5 | no | 70 %, 1 | 45 s | farmland |
-| Pumpkin | pumpkin | crop | 8 | yes | 85 %, 1–2 | 45 s | farmland |
-| Berry bush | berry bush | crop | 4 | no | 60 %, 1 | 45 s | forest edge |
+| Corn | — | crop | 5 | no | 70 %, 1 | 45 s | farmland |
+| Pumpkin | — | crop | 8 | yes | 85 %, 1–2 | 45 s | farmland |
+| Berry bush | — | crop | 4 | no | 60 %, 1 | 45 s | forest edge |
 | Sprout | farmland | crop | 2 | no | 25 %, 1 | 20 s | farmland (young crop) |
 | Sand pile | sand/path | earth | 6 | yes | 15 %, 1 | 60 s | paths |
 | Snowball | snow | earth | 5 | yes | 30 %, 1 | 60 s | mountain tops |
 | Shingle stack | roof | wood | 12 | yes | 40 %, 1 | 60 s | village |
-| Wood chest | wood chest | wood | 30 | yes | 100 %, 4–6 | never* | everywhere, few |
-| Stone chest | stone chest | stone | 50 | yes | 100 %, 6–8, +10 % tool | never* | castle, dungeons |
-| Mossy chest | mossy chest | earth | 30 | yes | 100 %, 4–6 | never* | forest, hidden spots |
+| Wood chest | — | wood | 30 | yes | 100 %, 4–6 | never* | everywhere, few |
+| Stone chest | — | stone | 50 | yes | 100 %, 6–8, +10 % tool | never* | castle, dungeons |
+| Mossy chest | — | earth | 30 | yes | 100 %, 4–6 | never* | forest, hidden spots |
 | Crystal | crystal | rock | 25 | yes | 100 %, 2 | never | dungeons |
 | Gold block | gold block | stone | 40 | yes | 100 %, 3 | never | rare, hard places |
 | *(no twin)* | bedrock | — | — | — | — | — | — |
@@ -275,8 +283,8 @@ A **prop** is a vox model sitting on the map, occupying one block cell (or a 2 �
 \* Chests don't regrow in place; instead, **new chests appear** at random chest spots during the trial (§8.4).
 
 - **Prop record**: `{ kind, x, y, z, yaw, hp, alive, regrowAt, hitT, size }`. `PROPS` table holds `{ vox, mat, hp, solid, drop, dropN, regrow, size }` per kind.
-- **Regrowing** **[assumed — see Q10]**: a broken prop comes back after its regrow time, but only if no hero is within 6 blocks (so it doesn't pop up in your face). It grows in with a quick scale-up.
-- **Damage persists** on a prop until it breaks or regrows (no healing) **[assumed]**.
+- **Regrowing**: a broken prop comes back after its regrow time, but only if no hero is within 6 blocks (so it doesn't pop up in your face). It grows in with a quick scale-up.
+- **Damage persists** on a prop until it breaks or regrows (no healing).
 - **Hit feedback**: prop flashes white (`pal` all → 7) for 4 frames and wobbles (`sx/sz` 1.15 → 1), plus 3 debris specks.
 - **Break**: 6 debris cubes in the prop's main color, break sound, roll drops (§8.5), remove from collision map.
 - Variants: there's room in the vox budget for 2–3 looks of common props (two rock shapes, three bush shapes), chosen at random.
@@ -319,7 +327,7 @@ Budget: roughly **600–900 props** in the world at once.
 - Each stat has its own icon model and color (§12).
 - Despawn after 40 s on the ground (blink in the last 5 s).
 - **Ambient spawning**: 60 powerups placed at match start; then 1 new powerup every 2 s at a random surface spot (weighted toward the hub and roads), until 120 are on the ground.
-- Drop stat choice: uniform random **[assumed]**. 4 % of drops are a **heart** instead.
+- Drop stat choice: uniform random. 4 % of drops are a **heart** instead.
 
 ### 8.6 Loose tools
 
@@ -350,8 +358,8 @@ Single vox, no limbs. Animation is a `sy` squash: `sy = 1 − 0.15·|sin(t·k)|`
 ### 8.8 Death & respawn
 
 - HP ≤ 0 or `y < −4` → the hero is "knocked out".
-- Lose **30 % of collected powerups** (rounded up), chosen at random from stats > 0; they **spill as loose powerups** at the knock-out spot (or at the hub, if you fell off the map) **[assumed]**.
-- Lose **one tool**: a random non-empty hand drops its tool at the knock-out spot **[assumed]**.
+- Lose **30 % of collected powerups** (rounded up), chosen at random from stats > 0; they **spill as loose powerups** at the knock-out spot for anyone to grab (or at the hub, if you fell off the map).
+- Lose **one tool**: a random non-empty hand drops its tool on the ground at the knock-out spot (or at the hub, if you fell off).
 - Respawn at the **hub in the map center** after 60 frames, full HP, 120 frames of i-frames.
 
 ---
@@ -365,7 +373,7 @@ Single vox, no limbs. Animation is a `sy` squash: `sy = 1 − 0.15·|sin(t·k)|`
 - Since nothing breaks, maps are drawn with `map(m)` and **never remeshed during play**.
 - Collision: `WORLD = [...scene.maps, PROPMAP]`.
 
-**Authoring workflow** **[assumed — see Q13]**
+**Authoring workflow**
 1. I write a `.gen.js` script per quadrant (heightmap, trees, castle, houses, dungeons) to make a first version.
 2. You open the cart in the IDE and hand-edit any quadrant in the Map tab, and place markers in the Scene tab.
 3. Once a quadrant has been hand-edited, its `.gen.js` is deleted and the `.bin` becomes the source (b3d `pack` enforces this, so edits are never lost).
@@ -395,7 +403,7 @@ Ground level is **y = 20**, leaving rows 1–19 for dungeons, with bedrock at y 
 Each region is one quadrant map, which makes editing one region independent of the others. The hub sits across all four corners where they meet.
 
 - **Hub** (center, ~20 × 20): flat stone plaza, the respawn point, 4 paths out to the quadrants. Some starting tools here.
-- **Forest** (−x, +z): gentle hills (±3), dense fixed trees (log trunks, leaf crowns), lots of log, bush, berry-bush and leaf-pile props. Bats, slimes, goblins, mushrooms.
+- **Forest** (−x, +z): gentle hills (±3), big fixed trees (log trunks, leaf crowns) mixed with many small breakable trees, plus log, bush, berry-bush and leaf-pile props. Bats, slimes, goblins, mushrooms.
 - **Castle** (+x, +z): raised ground (y 24), outer walls with gaps, a courtyard, a keep, and a **tower to y ≈ 50** with an outside staircase (1-block steps, so auto-climb works). Crates and stone-block rubble props. Platinum tool on top. Skeletons, goblins.
 - **Mountains** (+x, −z): heightmap to y ≈ 52, rock with snow caps, caves. Rock, boulder and snowball props. Ledges that need Jump stat. Golems, slimes. Platinum tool on the highest peak.
 - **Village & farms** (−x, −z): flat, 6–8 plank houses with roofs, a well, fenced farmland fields (crops sprout automatically). Crates and shingle stacks. Goblins, slimes.
@@ -421,19 +429,21 @@ The **map is always the same**. What varies (with a random seed per match): whic
 
 ## 10. Challenges
 
-At the end of the trial, 3 different challenges are drawn from the pool. The player picks **1, 2 or all 3** **[assumed — see Q8]**; all chosen goals must be finished inside **one 90-second timer**. Picking all 3 is the **Ultimate Challenge**.
+At the end of the trial, 3 different challenges are drawn from the pool. The player picks **exactly one**, or **all three** (the **Ultimate Challenge**). With all three, every goal must be finished inside **one 90-second timer**.
+
+Select screen: three cards side by side plus a fourth **ULTIMATE** card; left/right moves, O confirms.
 
 | Challenge | Setup | Goal | Default size |
 |---|---|---|---|
 | **Boss** | A level-6 version of a random minion type, scale ×3, spawns 12 blocks in front of the player. Card names it ("BIG GOBLIN"). | Defeat it | HP ×8 of base, dmg ×2.5 |
-| **Harvest** | Card names one prop class: wood (logs, crates), crops, or stone (rocks, boulders, stone blocks). All props of that class regrow instantly when the challenge starts. | Break X of them | wood 25, crops 20, stone 15 |
+| **Harvest** | Card names one prop class: wood (small trees, logs, crates), crops, or stone (rocks, boulders, stone blocks). All props of that class regrow instantly when the challenge starts. | Break X of them | wood 25, crops 20, stone 15 |
 | **Minion battle** | Minions in a 30-block radius are boosted to aggro the player; extra waves spawn. | Defeat X minions | 15 |
 | **Battle royale** | The 3 AI heroes, with their current stats and tools, turn hostile and hunt the player. | Knock out each AI hero once | 3 |
 | **Race** | Player teleported to a flag marker; a finish flag is placed at another flag marker 70–100 blocks away, with an arrow on the HUD. | Touch the flag | — |
 
-- During challenges that aren't Battle royale, AI heroes are removed **[assumed]**.
-- Dying during a challenge = **fail** **[assumed]**.
-- **Best time** is saved per *combination* of challenge types, keyed like `"boss+race"` (sorted), as the seconds used out of 90.
+- During challenges that aren't Battle royale, AI heroes are removed.
+- Dying during a challenge = **fail**.
+- **Best time** is saved per challenge type (`"boss"`, `"race"`, …) and per Ultimate combination, keyed like `"ult:boss+harvest+race"` (sorted), as the seconds used out of 90.
 
 ---
 
@@ -488,7 +498,7 @@ The cart is built from scratch with its own assets (not the Starter kit), as tex
 | 41 | Race flag |
 | 42 | Chest-spot marker (editor only, never drawn) |
 | 43–47 | Effects (spark, star, debris) |
-| 48–127 | **Props**: each kind from §8.2 plus variants (e.g. 48 grass tuft a, 49 grass tuft b, 50 rock a, 51 rock b, …). The `PROPS` table maps vox number → kind, so a marker of any variant is understood. |
+| 48–127 | **Props**: each kind from §8.2 plus variants (e.g. 48 grass tuft a, 49 grass tuft b, 50 rock a, 51 rock b, …). The `PROPS` table maps vox number → kind, so a marker of any variant is understood. Small trees are 8³ models drawn at scale 1.5. |
 | 128–255 | Free |
 
 Platinum tools reuse the tool models with a gold `pal()` swap. Big props (boulder) are drawn from an 8³ model at scale 2.
@@ -550,8 +560,11 @@ herotrial/
     maps/2-village.gen.js
     maps/3-mountains.gen.js
     scenes.json          scene 0: quadrant placements + markers
-  dist/                  b3d export output (GitHub Pages)
+  docs/                  b3d export output, served by GitHub Pages (main branch, /docs folder)
+  ACCOMPLISHMENTS.md     the 150 drafted accomplishments, for review
 ```
+
+Publishing: `b3d export game/ --out docs/`, commit, push. The game is then live at `https://paloblanco.github.io/herotrial/` once Pages is turned on for `/docs`.
 
 ### 14.2 `main.js` sections, in order
 
@@ -591,33 +604,31 @@ Rule of thumb: game objects are plain objects in arrays (`heroes`, `minions`, `p
 
 ---
 
-## 15. Open questions (for the quiz)
+## 15. Decisions (from the quiz, 2026-11-05)
 
-Each has my current assumption in the doc.
-
-1. **No jump button.** Is the ledge hop really the only way up (besides 1-block auto-climb)? It means stairs everywhere and ledges need a run-up.
-2. **In-air buttons.** In the air, O = flap and X = pound, so you can't swing while airborne. OK?
-3. **Pickup vs swing.** Same button picks up a nearby tool or swings. Is the "in range → pick up" prompt enough, or should pickup need a hold?
-4. **Camera with sideways input.** Camera-relative movement + aggressive auto-follow makes "hold left" spin you in circles. I planned to follow only on forward motion. Or should left/right *steer* like a kart?
-5. **Powerups lost on death** — spill on the ground for others to grab, or vanish?
-6. **Tool lost on death** — random hand, dropped on the ground?
-7. **Hitting a hero** — does it knock powerups out of them (City Trial style)?
-8. **Challenge picks** — 1, 2 or 3? The notes say "one … or all three" but also "more than one".
-9. **AI heroes during non-royale challenges** — removed, frozen, or still competing?
-10. **Prop regrowth** — should broken props come back during the trial (my assumption, with times per kind), or is the world gradually stripped bare?
-11. **Swing hits everything in the arc** — or cap it (e.g. 3 targets) so big-reach builds don't mow whole fields?
-12. **Fixed chest / crop tiles** — you asked to keep every tile. Fixed chests and crops look like things you can break; are they meant as decoration (storerooms, scenery), or should I use them sparingly?
-13. **Map authoring** — I generate first drafts of the quadrants in code, then you hand-edit in the IDE. Or would you rather build the maps yourself from the start, or keep them fully code-generated?
-14. **Trees** — fixed trees (tile trunks and leaves) with breakable logs lying around them. Or should a tree itself be breakable (e.g. a 2-cell-tall tree prop)?
-15. **Prop solidity** — crops/bushes/grass walk-through; rocks, logs, chests, pumpkins solid. Right split?
-16. **Spawn** — random quadrant each match, or the player picks?
-17. **Negative patches** — City Trial has stat-down patches. Want any?
-18. **HP regen** — none (hearts only), or slow regen?
-19. **Accomplishments** — want me to draft all 150, or give categories and write them together?
-20. **Platinum tools** — just stronger stats, or also a special effect each?
-21. **Hosting** — export to GitHub Pages from this repo?
-
----
+| # | Topic | Decision |
+|---|---|---|
+| 1 | Jump | Jump button added: **O + X together**. Ledge hop on walking off an edge stays. |
+| 2 | Air buttons | O = flap, X = ground pound. No swings in the air. |
+| 3 | Tool pickup | **Hold** the hand's button near a loose tool. Taps always swing. |
+| 4 | Camera | Auto-follow only from the forward part of the stick; strafing doesn't spin the camera. |
+| 5 | Powerups lost on knockout | 30 %, **spilled** on the ground for anyone. |
+| 6 | Tool lost on knockout | Random hand, **dropped** on the ground. |
+| 7 | Hero-on-hero hits | Each hit knocks **1 powerup** out. |
+| 8 | Challenge picks | **Exactly 1, or all 3** (Ultimate). |
+| 9 | AI heroes in challenges | Removed, except in Battle royale. |
+| 10 | Prop regrowth | Yes, timed per kind; chests don't regrow, new chests appear instead. |
+| 11 | Multi-hit | A swing hits **everything** in its arc. |
+| 12 | Fixed chest / crop tiles | **Dropped.** Chests and crops are props only. |
+| 13 | Map authoring | Claude generates drafts in code; Rocco hand-edits in the IDE. |
+| 14 | Trees | Big fixed trees plus **small breakable tree props** (1 cell, drawn ~1.5 tall). |
+| 15 | Prop solidity | Hard things solid (rocks, logs, trees, crates, chests, pumpkins); soft things walk-through. |
+| 16 | Spawn | Random quadrant each match. |
+| 17 | Negative patches | None. |
+| 18 | HP regen | Hearts only (plus the heal from raising Health). |
+| 19 | Accomplishments | Claude drafts all 150 in `ACCOMPLISHMENTS.md`; Rocco edits. |
+| 20 | Platinum tools | Better stats only, no special effects. |
+| 21 | Hosting | GitHub Pages from this repo (`/docs`). |
 
 ## 16. Milestones
 
