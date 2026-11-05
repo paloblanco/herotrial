@@ -1,0 +1,19 @@
+name log
+top
+44444444
+4ffff444
+4f4444f4
+4f4ff4f4
+4f4ff4f4
+4f4444f4
+44ffff44
+44444444
+side
+44444444
+44k44444
+kk4444kk
+kkkkkkkk
+4444k44k
+44444444
+444k44k4
+kkkkkkkk

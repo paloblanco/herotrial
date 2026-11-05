@@ -1,0 +1,10 @@
+name dungeon brick
+top
+gllll5ll
+g5llll5l
+glll5lll
+gggggggg
+l5l5glll
+l5llglll
+llllgll5
+gggggggg

@@ -1,0 +1,10 @@
+name planks
+top
+ffffffff
+ff9fffff
+ffff9ff9
+44444444
+ffffff99
+ffffff9f
+ffffffff
+44444444
