@@ -412,14 +412,18 @@ Each region is one quadrant map, which makes editing one region independent of t
 
 Four hidden dungeons, one per quadrant, in rows y 3–17. Entrances are fixed openings (no digging in).
 
-| Dungeon | Entrance | Content |
+| Dungeon | Way in / out | Content |
 |---|---|---|
-| Forest | hollow tree trunk | bats, mushrooms, 2 mossy chests |
-| Castle | cellar stairs in the keep | skeletons, lava, stone chests, platinum tool |
-| Mountain | cave mouth on a cliff | golems, crystals, platinum tool |
-| Village | bottom of the well | slimes (lvl 3), dig spots, gold-pedestal platinum tool |
+| Forest | stairs down inside the giant hollow tree | 3 rooms; 2 mossy chests, a chest spot, crystal, brick piles; bats, mushrooms |
+| Castle | stairs down from the keep floor | 3 rooms; a lava room (1-deep pit, stepping stones, island with the platinum spear), 2 stone chests, crystals, a gold block |
+| Mountain | a cave mouth on the mountainside, stairs down into the mountain | 3 rooms; a tall crystal cavern (6 crystals, gold block, platinum hammer) |
+| Village | drop down the well; walk out up stairs that come up inside a house | 3 rooms; 4 dig spots and the platinum shovel; slimes (lvl 3) |
 
-Each is 3–5 rectangular rooms joined by corridors, in dungeon brick, with brick-pile and crystal props. Monsters are level 3.
+All stairs are 3 wide, 1 block per step (auto-climb works both ways). Rooms are dungeon brick, 5 high (the crystal cavern 7), joined by 3-wide halls. Dungeon floors stand at y = 6. Monsters (milestone 3) are level 3.
+
+**Platinum tools (6):** sword on the castle tower, axe on top of the giant tree (a 2-wide stair winds up its trunk), mace on the mountain's highest peak, spear on the lava island, hammer in the crystal cavern, shovel in the village dungeon. Each sits on a gold block; a tool marker on gold is platinum.
+
+**Lava**: anything within half a block of lava takes 4 damage and is bounced up (with i-frames), so crossing the pit costs HP unless every gap is jumped.
 
 ### 9.4 What changes from match to match
 
@@ -636,7 +640,7 @@ Rule of thumb: game objects are plain objects in arrays (`heroes`, `minions`, `p
 |---|---|---|
 | 0 | **Spike**: 4 placeholder quadrant maps in a scene, `PROPMAP`, ~800 placeholder props, hero walking/climbing/hop/flap/pound, camera. | Hero runs around the whole world at 60 fps with props drawn and collidable.  **Done 2026-11-05** (see §18). |
 | 1 | **Swinging**: two hands, all 10 tools, unified hit test, prop damage/breaking/regrow, drops, powerups, all 8 stats wired. | Can farm stats from props and feel the stats change. **Done 2026-11-05** (see §18). |
-| 2 | **World**: generated drafts of the four quadrants, hub, tower, four dungeons; markers, tile rules, scatter zones, chest top-ups. | Every area exists, is reachable, and is full of props. |
+| 2 | **World**: generated drafts of the four quadrants, hub, tower, four dungeons; markers, tile rules, scatter zones, chest top-ups. | Every area exists, is reachable, and is full of props. **Done 2026-11-05** (see §18). |
 | 3 | **Minions**: six types, spawning, levels, drops. | Minions fight back; dungeons are dangerous. |
 | 4 | **AI heroes**: brain, hero-vs-hero combat. | Three rivals visibly grow stronger over 5 minutes. |
 | 5 | **Match flow**: all states, timer, challenge select, five challenges, results. | A full match plays start to finish. |
@@ -698,3 +702,16 @@ New:
 Tested headless: bare hands break a rock in ~4.5 s, a hammer in one hit; hold-to-pickup and tap-to-swing; walking into powerups; regrowth after 30 s; a sword hit knocks a powerup out of a rival; a knockout spills 30 % and drops the rival's tool; an 11-block pound smashes the pumpkin it lands on.
 
 Not yet: AI heroes still only wander (milestone 4), so they never fight back; the timer reaches 0:00 and shows TIME! but the challenge select is milestone 5.
+
+### Milestone 2 (2026-11-05)
+
+- Four dungeons (§9.3), each with 3 rooms, halls, and a way in and out; the giant hollow tree in the forest; a gold pedestal on the highest mountain peak. All 6 platinum tools placed.
+- Tower stair widened to 2 blocks (the 1-wide one was easy to fall off at corners); the giant tree's stair is 2 wide too.
+- Dig spots (8: 4 in the village dungeon, 4 hidden outside) can only be broken by a shovel; they drop 2–3 powerups.
+- Big props (boulders) check the ground under all four cells (one was sitting half over the cave mouth).
+- Auto-climb needs 1 block of headroom, not 2.
+- Lava fixed: it now hurts and bounces you (a hero could hover over a 1-wide pit without touching it).
+- Props on the far side of the ground line aren't drawn (underground: 213 → 4 prop draws).
+- `game/tools/markers.mjs` rebuilds scene 0's markers from `lib/world.mjs`. Stop using it once markers are placed by hand in the IDE.
+
+Tested headless with a waypoint walker: every dungeon walked room to room; all four stairs climbed from the bottom to the surface; the well drop; the giant tree stair to its platform; the tower stair to the top; the lava crossing, walking and jumping; a one-minute soak run with no errors.

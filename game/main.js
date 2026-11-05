@@ -1,4 +1,4 @@
-// HERO TRIAL — milestone 1: tools, swinging, breaking props, powerups and stats.
+// HERO TRIAL — milestone 2: the full world (dungeons, giant tree, platinum tools) on top of milestone 1.
 // Design: DESIGN.md in the repo root. Section numbers below (§) point into it.
 
 // =================================================================== 1. constants & tables
@@ -56,6 +56,7 @@ const MAT = {
 const PROPS = {
   tuft:      { vox: [48, 49], mat: 'plant', hp: 3,  solid: false, drop: 0.10, n: [1, 1], regrow: 30,  cls: '' },
   mound:     { vox: [50],     mat: 'earth', hp: 8,  solid: true,  drop: 0.15, n: [1, 1], regrow: 60,  cls: '' },
+  digspot:   { vox: [51],     mat: 'earth', hp: 6,  solid: false, drop: 1.00, n: [2, 3], regrow: 0,   cls: '', onlyDig: true },
   rock:      { vox: [52, 53], mat: 'rock',  hp: 18, solid: true,  drop: 0.40, n: [1, 1], regrow: 60,  cls: 'stone' },
   boulder:   { vox: [54],     mat: 'rock',  hp: 60, solid: true,  drop: 1.00, n: [3, 4], regrow: 120, cls: 'stone', scale: 2, size: 2 },
   stoneblk:  { vox: [55],     mat: 'stone', hp: 35, solid: true,  drop: 0.50, n: [1, 2], regrow: 90,  cls: 'stone' },
@@ -146,7 +147,7 @@ function buildWorld() {
     if (v == V.head) spawns.push([x, y + R, z])
     else if (v == V.chestSpot) chestSpots.push([flr(x), flr(y + 0.01), flr(z)])
     else if (TOOL_OF_VOX[v]) {
-      let g = groundAt(x, z), plat = g && g[1] == T.gold && abs(g[0] - y) < 0.5
+      let plat = mgetw(QUADS[quadOf(x, z)], x, y - 0.5, z)[0] == T.gold         // on a gold block: platinum
       addPickup('tool', x, y, z, { t: TOOL_OF_VOX[v], plat })
     }
     else if (PROP_OF_VOX[v]) addProp(PROP_OF_VOX[v], flr(x), flr(y + 0.01), flr(z), v, yaw)
@@ -200,7 +201,10 @@ function addProp(kind, x, y, z, vox, yaw) {
   let k = PROPS[kind], n = k.size || 1
   for (let dz = 0; dz < n; dz++) for (let dx = 0; dx < n; dx++) {
     if (propAt[cellKey(x + dx, y, z + dz)]) return null
-    if (n > 1 && (solidAt(x + dx + 0.5, y + 0.5, z + dz + 0.5) || !solidAt(x + dx + 0.5, y - 0.5, z + dz + 0.5))) return null
+    if (n > 1) {                            // big props need open ground at the same height under every cell
+      let g = groundAt(x + dx + 0.5, z + dz + 0.5)
+      if (!g || g[0] != y || OPEN_GROUND.indexOf(g[1]) < 0 || solidAt(x + dx + 0.5, y + 0.5, z + dz + 0.5)) return null
+    }
   }
   let p = { kind, x, y, z, vox: vox != null ? vox : rnd(k.vox), yaw: yaw != null ? yaw : flr(rnd(4)) / 4,
     hp: k.hp, alive: true, hitT: 0, growT: 0, regrowAt: 0 }
@@ -270,7 +274,7 @@ function propColor(p) {
   if (propColors[p.kind] == null) {
     let c = { tuft: 11, mound: 4, rock: 5, boulder: 5, stoneblk: 6, bricks: 5, tree: 3, log: 4, crate: 15, leaves: 3,
       bush: 27, corn: 10, pumpkin: 9, berry: 8, sprout: 27, sandpile: 15, snowball: 7, shingles: 8,
-      woodchest: 4, stonechest: 6, mosschest: 27, crystal: 13, goldblk: 10 }
+      woodchest: 4, stonechest: 6, digspot: 4, mosschest: 27, crystal: 13, goldblk: 10 }
     propColors[p.kind] = c[p.kind] != null ? c[p.kind] : 6
   }
   return propColors[p.kind]
@@ -392,7 +396,7 @@ function heroUpdate(h) {
   if (h.grounded && moving) {
     let m = sqrt(ax * ax + az * az) || 1, px = h.x + ax / m * 0.6, pz = h.z + az / m * 0.6
     let footY = flr(h.y - R + 0.05)
-    if (solidAt(px, footY + 0.5, pz) && !solidAt(px, footY + 1.5, pz) && !solidAt(h.x, footY + 2.5, h.z)) {
+    if (solidAt(px, footY + 0.5, pz) && !solidAt(px, footY + 1.5, pz) && !solidAt(h.x, footY + 1.5, h.z)) {
       h.vy = 0.15; h.grounded = false
     }
   }
@@ -419,8 +423,8 @@ function heroUpdate(h) {
   }
 
   // ---- lava
-  let [t] = mgetw(QUADS[quadOf(h.x, h.z)], h.x, h.y - R - 0.1, h.z)
-  if (t == T.lava && frame % 6 == 0) hurtHero(h, 1, null)
+  let [t] = mgetw(QUADS[quadOf(h.x, h.z)], h.x, h.y - R - 0.6, h.z)        // within half a block of lava
+  if (t == T.lava && h.iT == 0) { hurtHero(h, 4, null); h.vy = 0.24; h.grounded = false; h.hop = true; debris(h.x, h.y - R, h.z, 6, 9, 0.06) }
 
   // ---- powerups and hearts by touch
   for (let q of pickups) {
@@ -478,6 +482,7 @@ function strike(h, k, mulIn) {
       if (!p.alive) continue
       let [cx, cy, cz] = propCenter(p), r = 0.45 * (PROPS[p.kind].size || 1)
       if (!inArc(cx, cy, cz, r)) continue
+      if (PROPS[p.kind].onlyDig && tl.types.indexOf('dig') < 0) { sfx(S.clink); continue }   // only a shovel digs
       let dmg = tl.dmg * mul * mm(PROPS[p.kind].mat)
       hitProp(p, dmg, h); hits++
       if (dmg >= 15) big = true
@@ -790,13 +795,14 @@ function drawProps() {
   drawn = 0
   let [fx, , fz] = dir3(camYaw)
   let cx = player.x, cz = player.z
+  let under = player.y < 14                                    // in a dungeon: surface props are hidden, and the other way round
   let b0x = max(0, flr((cx - DRAW_R) / 8)), b1x = min(15, flr((cx + DRAW_R) / 8))
   let b0z = max(0, flr((cz - DRAW_R) / 8)), b1z = min(15, flr((cz + DRAW_R) / 8))
   for (let bz = b0z; bz <= b1z; bz++) for (let bx = b0x; bx <= b1x; bx++) {
     let list = grid[bx + 16 * bz]
     if (!list) continue
     for (let p of list) {
-      if (!p.alive) continue
+      if (!p.alive || (p.y < 14) != under) continue
       let k = PROPS[p.kind], n = k.size || 1
       let dx = p.x + n / 2 - camPos[0], dz = p.z + n / 2 - camPos[2]
       if (dx * fx + dz * fz < -2) continue                     // behind the camera

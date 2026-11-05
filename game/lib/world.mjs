@@ -65,6 +65,17 @@ export function column(x, z) {
 }
 
 // ---------------------------------------------------------------- building
+// A ring stair cell (x, z) around a core x0..x1, z0..z1, plus the cells just outside it (2-wide stairs;
+// corners also get the diagonal cell).
+function widen(x, z, x0, z0, x1, z1) {
+  const ox = x < x0 ? -1 : x > x1 ? 1 : 0, oz = z < z0 ? -1 : z > z1 ? 1 : 0;
+  const out = [[x, z]];
+  if (ox) out.push([x + ox, z]);
+  if (oz) out.push([x, z + oz]);
+  if (ox && oz) out.push([x + ox, z + oz]);
+  return out;
+}
+
 export function buildQuadrant(map, ox, oz) {
   const set = (wx, y, wz, t) => {
     const x = wx - ox, z = wz - oz;
@@ -94,7 +105,7 @@ export function buildQuadrant(map, ox, oz) {
   box(90, P, 104, 101, P + 7, 114, T.stone); box(91, P, 105, 100, P + 6, 113, 0);        // keep, hollow
   box(95, P, 104, 96, P + 2, 104, 0);                                                     // keep door
   box(90, P + 8, 104, 101, P + 8, 114, T.roof);
-  // tower: 6 x 6 core from the plateau to y 50, a 1-wide stair ring around it rising 1 per step
+  // tower: 6 x 6 core from the plateau to y 50, a 2-wide stair ring around it rising 1 per step
   const tx0 = 106, tz0 = 88, TOP = 50;
   box(tx0, P, tz0, tx0 + 5, TOP - 1, tz0 + 5, T.stone);
   box(tx0 - 1, TOP - 1, tz0 - 1, tx0 + 6, TOP - 1, tz0 + 6, T.stone);                     // top platform
@@ -107,17 +118,12 @@ export function buildQuadrant(map, ox, oz) {
   for (let z = tz0; z <= tz0 + 6; z++) ring.push([tx0 + 6, z]);              // east side, going +z
   for (let x = tx0 + 5; x >= tx0 - 1; x--) ring.push([x, tz0 + 6]);          // north side, going -x
   for (let z = tz0 + 5; z >= tz0; z--) ring.push([tx0 - 1, z]);              // west side, going -z
-  // two laps: the second lap one block further out
+  // one lap, 2 blocks wide: each step also fills the cell(s) just outside it
   let y = P;
-  for (let lap = 0; lap < 2 && y < TOP - 1; lap++) {
-    const o = lap;   // offset outward
-    for (const [rx, rz] of ring) {
-      if (y >= TOP - 1) break;
-      const sx = rx < tx0 ? rx - o : rx > tx0 + 5 ? rx + o : rx;
-      const sz = rz < tz0 ? rz - o : rz > tz0 + 5 ? rz + o : rz;
-      box(sx, P, sz, sx, y, sz, T.stone);
-      y++;
-    }
+  for (const [rx, rz] of ring) {
+    if (y >= TOP - 1) break;
+    for (const [sx, sz] of widen(rx, rz, tx0, tz0, tx0 + 5, tz0 + 5)) box(sx, P, sz, sx, y, sz, T.stone);
+    y++;
   }
 
   // ---- village: houses, farm fields and a well
@@ -135,8 +141,7 @@ export function buildQuadrant(map, ox, oz) {
     for (let z = z0; z <= z1; z++) for (let x = x0; x <= x1; x++) set(x, GROUND - 1, z, (z - z0) % 3 == 2 ? T.dirt : T.farmland);
   };
   field(10, 10, 26, 22); field(30, 8, 40, 20); field(20, 30, 38, 40);
-  box(48, GROUND, 46, 52, GROUND, 50, T.stone); box(49, GROUND, 47, 51, GROUND, 49, 0);  // well rim
-  box(49, GROUND - 6, 47, 51, GROUND - 1, 49, 0);                                          // well shaft (dungeon entrance later)
+  box(48, GROUND, 46, 52, GROUND, 50, T.stone); box(49, GROUND, 47, 51, GROUND, 49, 0);  // well rim (the shaft is carved with the dungeon)
 
   // ---- forest: big fixed trees on a jittered grid (keeps clear of paths and the hub)
   for (let gz = 66; gz < 124; gz += 9) for (let gx = 4; gx < 60; gx += 9) {
@@ -155,6 +160,151 @@ export function buildQuadrant(map, ox, oz) {
     for (let k = 0; k < len; k++) { const c = column(x + k, z); if (c && !onPath(x + k, z)) set(x + k, c.h, z, T.bush); }
   }
 
-  // ---- hub: a low ring of stone posts, and gold pedestals for platinum tools later
+  // ---- hub: a low ring of stone posts
   for (const [x, z] of [[54, 54], [73, 54], [54, 73], [73, 73]]) box(x, GROUND, z, x, GROUND + 1, z, T.stone);
+
+  // ---- dungeons (§9.3). Shells (brick lining where there was ground) first, then all the carving,
+  //      so rooms and halls that touch open into each other.
+  const shells = [], carves = [], after = [];
+  const get = (wx, y, wz) => {
+    const x = wx - ox, z = wz - oz;
+    return x >= 0 && x < map.w && z >= 0 && z < map.d && y >= 0 && y < map.h ? map.get(x, y, z) : 0;
+  };
+  const line = (x0, y0, z0, x1, y1, z1, t) => {
+    for (let y = y0; y <= y1; y++) for (let z = z0; z <= z1; z++) for (let x = x0; x <= x1; x++) if (get(x, y, z)) set(x, y, z, t);
+  };
+  const room = (x0, z0, x1, z1, h = 5) => {
+    shells.push(() => { line(x0 - 1, F - 1, z0 - 1, x1 + 1, F + h, z1 + 1, T.brick); box(x0, F - 1, z0, x1, F - 1, z1, T.brick); });
+    carves.push(() => box(x0, F, z0, x1, F + h - 1, z1, 0));
+  };
+  const hall = (x0, z0, x1, z1) => room(x0, z0, x1, z1, 3);
+  // stairs from standing height yTop down to the dungeon floor, along x or z, `step` +1/-1, a0..a1 across
+  const stairs = (axis, start, step, a0, a1, yTop) => {
+    const n = yTop - F;
+    for (let i = 0; i <= n; i++) {
+      const c = start + step * i, fy = yTop - 1 - i;
+      const B = (lo, y0, hi, y1, t, lined) => axis == 'x'
+        ? (lined ? line : box)(c, y0, lo, c, y1, hi, t) : (lined ? line : box)(lo, y0, c, hi, y1, c, t);
+      shells.push(() => { B(a0 - 1, fy, a1 + 1, fy + 4, T.brick, true); B(a0, fy, a1, fy, T.brick, false); });
+      carves.push(() => B(a0, fy + 1, a1, fy + 3, 0, false));
+    }
+    return start + step * n;
+  };
+  const pedestal = (x, z) => after.push(() => set(x, F - 1, z, T.gold));
+  const lavaPit = (x0, z0, x1, z1) => after.push(() => { box(x0, F - 2, z0, x1, F - 2, z1, T.lava); box(x0, F - 1, z0, x1, F - 1, z1, 0); });
+  const floorAt = (x0, z0, x1, z1, t) => after.push(() => box(x0, F - 1, z0, x1, F - 1, z1, t));
+
+  for (const d of DUNGEONS) {
+    if (d.name == 'forest') {
+      const g = GIANT, end = stairs('z', g.z + 1, -1, g.x - 1, g.x + 1, g.base);
+      room(g.x - 6, end - 11, g.x + 6, end);                        // A: under the tree
+      hall(g.x + 7, end - 7, g.x + 13, end - 5);                    // A -> B
+      room(g.x + 14, end - 14, g.x + 24, end - 2);                  // B
+      hall(g.x - 1, end - 19, g.x + 1, end - 12);                   // A -> C
+      room(g.x - 5, end - 30, g.x + 7, end - 20);                   // C
+    } else if (d.name == 'castle') {
+      const end = stairs('x', 99, -1, 106, 108, GROUND + 4);        // from the keep floor, going west
+      room(70, 100, end, 112);                                       // A
+      hall(74, 86, 76, 99); hall(77, 90, 83, 92);                    // A -> B
+      room(84, 86, 100, 98);                                         // B: the lava room
+      lavaPit(86, 88, 98, 96);                                       // a pit one block deep...
+      floorAt(91, 91, 93, 93, T.brick);                                // ...an island in the middle,
+      for (const x of [87, 89, 95, 97]) floorAt(x, 92, x, 92, T.brick);   // stepping stones: every gap is 1 block
+      pedestal(92, 92);
+      hall(101, 96, 103, 100);                                       // B -> C
+      room(104, 98, 114, 110);                                       // C
+    } else if (d.name == 'mountain') {
+      const end = stairs('x', MOUTH.x, 1, MOUTH.z - 1, MOUTH.z + 1, MOUTH.h);   // the cave mouth, going east into the mountain
+      room(end, 32, end + 11, 44);                                   // A
+      hall(104, 27, 106, 31);                                        // A -> B
+      room(98, 12, 116, 26, 7);                                      // B: crystal cavern, taller
+      pedestal(114, 14);
+      hall(95, 18, 97, 20);                                          // B -> C
+      room(84, 14, 94, 24);                                          // C
+    } else if (d.name == 'village') {
+      carves.push(() => box(49, F, 47, 51, GROUND - 1, 49, 0));     // the well: a drop straight down
+      room(44, 38, 56, 52);                                          // A: under the well
+      const end = stairs('z', 33, -1, 45, 47, GROUND);              // the way out: stairs up into the house at (44, 30)
+      room(40, 8, 52, end);                                          // B: at the bottom of those stairs
+      hall(50, end + 1, 52, 37);                                     // B -> A
+      hall(31, 44, 43, 46);                                          // A -> C
+      room(18, 40, 30, 50);                                          // C
+      pedestal(24, 45);
+    }
+  }
+  for (const f of shells) f();
+  for (const f of carves) f();
+  for (const f of after) f();
+
+  // ---- the giant hollow tree (forest): a stair winds up the outside to a platform with a platinum tool;
+  //      inside, stairs lead down to the forest dungeon
+  {
+    const { x: cx, z: cz, base } = GIANT;
+    for (let y = base; y < base + 18; y++) for (let z = cz - 6; z <= cz + 6; z++) for (let x = cx - 6; x <= cx + 6; x++) set(x, y, z, 0);
+    box(cx - 2, base, cz - 2, cx + 2, base + 11, cz + 2, T.log);                           // trunk 5 x 5
+    box(cx - 1, base, cz - 1, cx + 1, base + 10, cz + 1, 0);                               // hollow
+    box(cx, base, cz + 2, cx, base + 1, cz + 2, 0);                                         // door on the north side
+    // outside stair: half a lap, from the south-east corner around the south and west sides
+    const ring = [];
+    for (let x = cx + 3; x >= cx - 3; x--) ring.push([x, cz - 3]);
+    for (let z = cz - 2; z <= cz + 2; z++) ring.push([cx - 3, z]);
+    ring.forEach(([x, z], i) => { for (const [sx, sz] of widen(x, z, cx - 2, cz - 2, cx + 2, cz + 2)) box(sx, base - 1, sz, sx, base + i, sz, T.log); });
+    box(cx - 2, base + 11, cz - 2, cx + 2, base + 11, cz + 2, T.planks);                   // platform: the trunk's top, level with the last step
+    set(cx, base + 11, cz, T.gold);                                                         // pedestal
+    for (let y = base + 10; y <= base + 16; y++) for (let z = cz - 7; z <= cz + 7; z++) for (let x = cx - 7; x <= cx + 7; x++) {
+      const d = Math.hypot(x - cx, z - cz, (y - base - 12) * 1.4);
+      if (d > 4.4 && d < 7 && Math.max(Math.abs(x - cx), Math.abs(z - cz)) >= 5) set(x, y, z, T.leaves);  // a leafy ring, clear of the stair
+    }
+  }
+
+  // ---- mountain peak: a gold pedestal on the highest column
+  set(PEAK.x, PEAK.h - 1, PEAK.z, T.gold);
+}
+
+// ---------------------------------------------------------------- features shared with the marker script
+export const F = 6;                                     // dungeon floor: the height you stand at
+const minH = (x0, z0, x1, z1) => {
+  let m = 99;
+  for (let z = z0; z <= z1; z++) for (let x = x0; x <= x1; x++) { const c = column(x, z); if (c) m = Math.min(m, c.h); }
+  return m;
+};
+export const GIANT = { x: 16, z: 106, base: minH(14, 104, 18, 108) };
+export const MOUTH = { x: 78, z: 39, h: column(78, 39).h };
+export const PEAK = (() => {
+  let best = { x: 0, z: 0, h: 0 };
+  for (let z = 4; z < 60; z++) for (let x = 68; x < 124; x++) {
+    const c = column(x, z);
+    if (c && c.h > best.h && Math.abs(x - MOUTH.x) > 4) best = { x, z, h: c.h };
+  }
+  return best;
+})();
+export const DUNGEONS = [{ name: 'forest' }, { name: 'castle' }, { name: 'mountain' }, { name: 'village' }];
+
+// Where things go, for the scene's markers: [vox, x, standY, z]. Vox: 16-24 tools (platinum on gold),
+// 42 chest spot, 51 dig spot, 56 brick pile, 71 stone chest, 72 mossy chest, 73 crystal, 74 gold block.
+export function features() {
+  const g = GIANT, fz = g.z + 1 - (g.base - F);        // forest stairs' last step
+  const list = [
+    // platinum tools (the tower's is placed by the marker script already)
+    [18, g.x, g.base + 12, g.z],                       // axe on the giant tree
+    [22, PEAK.x, PEAK.h, PEAK.z],                      // mace on the mountain peak
+    [19, 92, F, 92],                                   // spear on the lava island
+    [17, 114, F, 14],                                  // hammer in the crystal cavern
+    [23, 24, F, 45],                                   // shovel in the village dungeon
+    // forest dungeon
+    [72, g.x - 5, F, fz - 10], [72, g.x + 23, F, fz - 13], [42, g.x + 6, F, fz - 29],
+    [56, g.x + 15, F, fz - 3], [56, g.x - 4, F, fz - 21], [73, g.x + 20, F, fz - 8],
+    // castle dungeon
+    [71, 113, F, 109], [71, 105, F, 99], [42, 110, F, 104], [73, 71, F, 101], [73, 72, F, 111],
+    [56, 78, F, 102], [56, 85, F, 87], [56, 107, F, 108], [74, 99, F, 97],
+    // mountain dungeon
+    [73, 100, F, 13], [73, 102, F, 24], [73, 108, F, 18], [73, 115, F, 22], [73, 111, F, 25], [73, 99, F, 19],
+    [74, 115, F, 13], [42, 89, F, 19], [56, 85, F, 15], [56, 93, F, 23],
+    // village dungeon
+    [51, 20, F, 42], [51, 28, F, 48], [51, 22, F, 49], [51, 29, F, 41], [42, 46, F, 10],
+    [56, 41, F, 9], [56, 55, F, 39], [71, 54, F, 51],
+    // dig spots hidden on the surface
+    [51, 34, 20, 26], [51, 12, column(12, 84).h, 84], [51, 90, column(90, 52).h, 52], [51, 60, 20, 36],
+  ];
+  return list;
 }
