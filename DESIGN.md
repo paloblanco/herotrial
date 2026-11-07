@@ -439,7 +439,7 @@ Select screen: three cards side by side plus a fourth **ULTIMATE** card; left/ri
 
 | Challenge | Setup | Goal | Default size |
 |---|---|---|---|
-| **Boss** | A level-6 version of a random minion type, scale ×3, spawns 12 blocks in front of the player. Card names it ("BIG GOBLIN"). | Defeat it | HP ×8 of base, dmg ×2.5 |
+| **Boss** | A random minion type, scale ×3, spawns 12 blocks in front of the player. Card names it ("BIG GOBLIN"). It never gives up the chase. | Defeat it | HP ×8 of base (at least 200), dmg ×2.5 |
 | **Harvest** | Card names one prop class: wood (small trees, logs, crates), crops, or stone (rocks, boulders, stone blocks). All props of that class regrow instantly when the challenge starts. | Break X of them | wood 25, crops 20, stone 15 |
 | **Minion battle** | Minions in a 30-block radius are boosted to aggro the player; extra waves spawn. | Defeat X minions | 15 |
 | **Battle royale** | The 3 AI heroes, with their current stats and tools, turn hostile and hunt the player. | Knock out each AI hero once | 3 |
@@ -643,7 +643,7 @@ Rule of thumb: game objects are plain objects in arrays (`heroes`, `minions`, `p
 | 2 | **World**: generated drafts of the four quadrants, hub, tower, four dungeons; markers, tile rules, scatter zones, chest top-ups. | Every area exists, is reachable, and is full of props. **Done 2026-11-05** (see §18). |
 | 3 | **Minions**: six types, spawning, levels, drops. | Minions fight back; dungeons are dangerous. **Done 2026-11-05** (see §18). |
 | 4 | **AI heroes**: brain, hero-vs-hero combat. | Three rivals visibly grow stronger over 5 minutes. **Done 2026-11-05** (see §18). |
-| 5 | **Match flow**: all states, timer, challenge select, five challenges, results. | A full match plays start to finish. |
+| 5 | **Match flow**: all states, timer, challenge select, five challenges, results. | A full match plays start to finish. **Done 2026-11-07** (see §18). |
 | 6 | **Persistence**: best times, accomplishment board and checks. | Times and accomplishments survive a reload. |
 | 7 | **Polish**: art pass, sounds, music, HUD, title, export. | Playable on desktop, gamepad and phone. |
 
@@ -736,3 +736,16 @@ Tested headless: each type hurts an idle hero (or knocks it out); each dies to a
 Tested headless over 2.5 minutes of trial: no rival fell off the world or got stuck for long; they picked up tools (one took the platinum sword) and ended at 40, 69 and 172 total stats. A stronger rival chased the player, knocked all 4 powerups out of them, and then collected them.
 
 **Balance note for later**: one rival reached 172 total stats by 2:30 by mowing the village farm fields with a sword. The farms (~120 crops, 70–85 % drop chance, 45 s regrowth) plus multi-hit swings are by far the richest source of powerups.
+
+### Milestone 5 (2026-11-07)
+
+- States: **title** (camera circling the hub; O starts; in DEBUG, X starts a 30-second trial for testing the flow) → **spawn** (READY / GO!, 2 s) → **trial** (5:00) → **select** (3 random different challenges plus ULTIMATE; stick/d-pad and O; a 40-frame pause first so a held button doesn't pick) → **challenge** (1:30, goals listed under the stats, ticked off as they're done; boss HP bar) → **results** (clear/failed, each goal, time, NEW BEST, total stats) → title. The world is frozen on the select and results screens.
+- Challenges: Boss (any of the six minions, ≥200 HP), Harvest (wood 25 / crop 20 / stone 15, that class regrows at the start), Minion Battle (15 kills; nearby minions turn on you and waves of 5 arrive every 12 s), Battle Royale (rivals respawn if down, all hunt you; a knocked-out rival stays out), Race (you're moved to a flag marker; the finish flag is another one 70–100 blocks away, with a beam and an arrow of dots over your head). Ultimate = all three, one 90-second timer.
+- Knocked out or falling during a challenge = fail. Rivals sit out every challenge except Battle Royale.
+- Best times are saved (`save`) per challenge type and per Ultimate combination, and shown on the cards.
+- 14 race flag markers added to scene 0. Each new match rebuilds the world; the invisible prop map is reused and cleared.
+- Hit-stop (`freeze`) pauses the challenge timer too.
+
+Tested headless with a scripted player at 15 in every stat (sword + mace): Big Bat and Big Golem bosses (the golem knocked out a player who stood still swinging; that's a fail, as designed), Minion Battle cleared in 28.4 s, Battle Royale in 14.1 s, three races in 16–25 s, crop Harvest in 2.0 s, and an Ultimate that ran out of time at 90.0 s with 2 of 3 goals done.
+
+**Balance notes for later**: a Reach-15 sword mows 20 crops in 2 s (the farm again); a 64-HP Big Bat died in 1.8 s before the 200-HP floor.

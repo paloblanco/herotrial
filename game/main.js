@@ -1,4 +1,4 @@
-// HERO TRIAL — milestone 4: rival heroes with a brain, on top of minions (3), the world (2) and tools/stats (1).
+// HERO TRIAL — milestone 5: the whole match (title, 5-minute trial, challenges, results) on top of milestones 1-4.
 // Design: DESIGN.md in the repo root. Section numbers below (§) point into it.
 
 // =================================================================== 1. constants & tables
@@ -6,7 +6,7 @@
 const DEBUG = true
 const WORLD_W = 128, WORLD_H = 64, WORLD_D = 128
 const HUB = [64, 20.4, 64]
-const TRIAL_FRAMES = 300 * 60
+const TRIAL_FRAMES = 300 * 60, CHALLENGE_FRAMES = 90 * 60
 
 // fixed map tiles (§8.1)
 const T = { grass: 1, dirt: 2, rock: 3, stone: 4, brick: 5, log: 6, planks: 7, leaves: 8, bush: 9,
@@ -126,7 +126,7 @@ let scene, WORLD, QUADS, PROPMAP
 let props = []                              // every prop record
 let grid = {}                               // spatial grid: bucket key -> props in it (8 x 8 blocks)
 let propAt = {}                             // cellKey -> prop (one prop per cell; big props fill several keys)
-let spawns = [], chestSpots = [], minionSpots = []
+let spawns = [], chestSpots = [], minionSpots = [], flagSpots = []
 
 const cellKey = (x, y, z) => x + WORLD_W * (y + WORLD_H * z)
 const bucketKey = (x, z) => (x >> 3) + 16 * (z >> 3)
@@ -150,14 +150,16 @@ function solidAt(x, y, z) {
 function buildWorld() {
   scene = scene_load(0)
   QUADS = scene.maps
-  PROPMAP = map_new(WORLD_W, WORLD_H, WORLD_D)   // invisible: never drawn, only collided with (§8.3)
+  if (PROPMAP == null) PROPMAP = map_new(WORLD_W, WORLD_H, WORLD_D)   // invisible: never drawn, only collided with (§8.3)
+  else map_box(PROPMAP, 0, 0, 0, WORLD_W - 1, WORLD_H - 1, WORLD_D - 1, 0)
   WORLD = QUADS.concat([PROPMAP])
-  props = []; grid = {}; propAt = {}; spawns = []; chestSpots = []; pickups = []; minions = []; minionSpots = []
+  props = []; grid = {}; propAt = {}; spawns = []; chestSpots = []; pickups = []; minions = []; minionSpots = []; flagSpots = []
 
   // scene markers (§8.4)
   for (let [v, x, y, z, yaw] of scene.things) {
     if (v == V.head) spawns.push([x, y + R, z])
     else if (v == V.chestSpot) chestSpots.push([flr(x), flr(y + 0.01), flr(z)])
+    else if (v == V.flag) flagSpots.push([x, y, z])
     else if (MINIONS[v]) {
       if (y < 14) addMinion(v, x, y, z, 3, true)                // dungeon garrison: level 3, never respawns
       else minionSpots.push([v, x, y, z])                          // a surface spawn point
@@ -270,7 +272,7 @@ function breakProp(p, h) {
   let [cx, cy, cz] = propCenter(p)
   debris(cx, cy, cz, 8, propColor(p), 0.12)
   sfx(S.brk)
-  if (h) h.broken++
+  if (h) { h.broken++; if (k.cls) h.brokenCls[k.cls] = (h.brokenCls[k.cls] || 0) + 1 }
   if (rnd(1) < k.drop) {
     let n = k.n[0] + flr(rnd(k.n[1] - k.n[0] + 1))
     for (let i = 0; i < n; i++) dropPowerup(cx, cy, cz)
@@ -339,7 +341,7 @@ function makeHero(i, pos) {
     pressT: [99, 99], chordLock: false,     // frames since each button went down; jump-chord latch
     holdT: [0, 0], near: null,              // tool pickup: frames held near a tool, the tool in range
     gained: [0, 0, 0, 0, 0, 0, 0, 0],       // HUD flash per stat
-    broken: 0, collected: 0, kills: 0,
+    broken: 0, collected: 0, kills: 0, brokenCls: {},
     ctrl: { sx: 0, sy: 0, b: [false, false], bp: [false, false] },
     aim: 0, brain: { goal: null, think: 0, last: null, black: [], stuckT: 0 } }
 }
@@ -576,6 +578,10 @@ function hurtHero(o, raw, from) {
 
 function knockOut(h, fell) {
   if (h.koT > 0) return
+  if (state == 'challenge') {
+    if (h === player) { debris(h.x, h.y, h.z, 14, h.color, 0.15); sfx(S.ko); h.koT = 1e9; endChallenge(false); return }
+    if (ch.royale) { ch.royaleOut++; debris(h.x, h.y, h.z, 14, h.color, 0.15); sfx(S.ko); h.koT = 1e9; return }   // out for good
+  }
   let at = fell ? HUB : [h.x, h.y, h.z]
   let n = ceil(totalStats(h) * 0.3)
   spillPowerups(h, n, at)
@@ -644,14 +650,15 @@ function minionUpdate(m) {
 
   // ---- pick a target: the nearest hero in range; keep chasing until it's well out of range
   if (m.t % 10 == 0 || (m.target && m.target.koT > 0)) {
-    let best = null, bd = m.target && m.target.koT == 0 ? d.aggro * 1.5 : d.aggro
+    let ag = m.boss ? 60 : d.aggro
+    let best = null, bd = m.target && m.target.koT == 0 ? ag * 1.5 : ag
     for (let h of heroes) {
       if (h.koT > 0 || abs(h.y - m.y) > 4) continue
       let dd = dist([h.x, h.z], [m.x, m.z])
       if (dd < bd) { bd = dd; best = h }
     }
     m.target = best
-    if (dist([m.x, m.z], [m.home[0], m.home[2]]) > 16) m.target = null      // leash: go home
+    if (!m.boss && dist([m.x, m.z], [m.home[0], m.home[2]]) > 16) m.target = null      // leash: go home
   }
   let tx, tz, chase = !!m.target
   if (chase) { tx = m.target.x; tz = m.target.z }
@@ -686,12 +693,12 @@ function minionUpdate(m) {
     }
   } else if (d.atk == 'puff') {                             // mushroom: stays put, puffs spores when you're close
     m.vx *= 0.8; m.vz *= 0.8                                  // (it only moves when knocked back)
-    if (chase && dd < 2.4 && m.cd == 0 && m.atkT == 0) m.atkT = 24
+    if (chase && dd < min(4.7, 2.4 * m.scale / d.scale) && m.cd == 0 && m.atkT == 0) m.atkT = 24
   }
 
   // ---- attacks land when the windup ends
   if (m.atkT > 0 && --m.atkT == 0) {
-    let rad = d.atk == 'puff' ? 2.2 : reach + 0.6
+    let rad = d.atk == 'puff' ? min(4.5, 2.2 * m.scale / d.scale) : reach + 0.6
     for (let h of heroes) if (h.koT == 0 && h.iT == 0 && dist([h.x, h.y, h.z], [m.x, m.y, m.z]) < rad) hurtHero(h, m.dmg, m)
     if (d.atk == 'puff') for (let i = 0; i < 10 && particles.length < 160; i++) { let a = i / 10; particles.push({ x: m.x, y: m.y + 0.3, z: m.z, vx: cos(a) * 0.06, vy: 0.04, vz: sin(a) * 0.06, c: 14, life: 22, s: 0.12, spark: true }) }
     m.cd = d.atk == 'puff' ? 90 : 50
@@ -747,12 +754,14 @@ function hurtMinion(m, dmg, from) {
 function killMinion(m, h) {
   let d = MINIONS[m.v]
   m.alive = false
+  if (m.boss) { ch.bossDown = true; m.deep = true; freeze(20); shake = 12; for (let i = 0; i < 10; i++) dropPowerup(m.x, m.y, m.z) }
   m.deadT = m.deep ? 0 : MINION_RESPAWN
   let n = d.drops[0] + flr(rnd(d.drops[1] - d.drops[0] + 1)) + (m.lvl - 1)   // higher levels drop a bit more
   for (let i = 0; i < n; i++) dropPowerup(m.x, m.y, m.z)
   debris(m.x, m.y, m.z, 12, d.col, 0.13)
   sfx(S.ko)
   if (h && h.kills != null) h.kills++
+  if (h === player && state == 'challenge') ch.kills++
 }
 
 // dead surface minions come back after a while, at a spawn point the player can't see
@@ -975,7 +984,8 @@ function aiBrain(h) {
   c.sx = 0; c.sy = 0; c.b = [false, false]; c.bp = [false, false]
   if (h.koT > 0) { b.goal = null; return }
   if (b.goal && !goalAlive(b.goal)) { b.goal = null; b.think = 0 }
-  if (--b.think <= 0) { b.think = AI_THINK + flr(rnd(5)); aiChoose(h) }
+  if (state == 'challenge' && ch.royale) b.goal = { kind: 'hero', ref: player }     // Battle Royale: everyone hunts you
+  else if (--b.think <= 0) { b.think = AI_THINK + flr(rnd(5)); aiChoose(h) }
 
   // stuck: hardly moved in 2 s while trying to go somewhere -> jump, give up on that goal for 10 s
   if ((frame + h.i * 40) % 120 == 0) {
@@ -1054,14 +1064,23 @@ function cameraDraw(h) {
   camPos = [t[0] - fx * d, t[1] - fy * d, t[2] - fz * d]
 }
 
-// =================================================================== 9. states
+// =================================================================== 9. states (§3)
 
-let state = 'trial', frame = 0, trialLeft = TRIAL_FRAMES
+let state = 'title', stateT = 0, frame = 0, trialLeft = TRIAL_FRAMES, quick = false
 let drawn = 0, fps = 60, lastMs = 0, fpsAcc = 0, fpsN = 0
+let bests = {}                               // best challenge times, saved: { key: seconds }
 
 function _init() {
   touch_set_mode(1)
   mouse_set_mode(2)
+  let data = load()
+  if (data && data.bests) bests = data.bests
+  newMatch()
+  state = 'title'; stateT = 0
+}
+
+// a fresh world, fresh heroes and a full timer
+function newMatch() {
   frame = 0; trialLeft = TRIAL_FRAMES; particles = []; popups = []
   heroes = []
   buildWorld()
@@ -1070,6 +1089,8 @@ function _init() {
   player = heroes[0]
   camYaw = yaw_to(64 - player.x, 64 - player.z)               // start looking toward the hub
   player.yaw = camYaw
+  for (let h of heroes) h.yaw = h.aim = yaw_to(64 - h.x, 64 - h.z)
+  ch = null
 }
 
 let updMs = 0, drawMs = 0                    // DEBUG: smoothed CPU time of _update and _draw
@@ -1077,8 +1098,23 @@ const now = () => (typeof performance != 'undefined' ? performance.now() : Date.
 
 function _update() {
   let t0 = now()
-  frame++
-  if (trialLeft > 0) trialLeft--
+  stateT++
+  if (state == 'title') titleUpdate()
+  else if (state == 'spawn') { if (stateT >= 120) setState('trial') }
+  else if (state == 'select') selectUpdate()
+  else if (state == 'results') resultsUpdate()
+  else {                                     // trial or challenge: the world runs
+    frame++
+    worldUpdate()
+    if (state == 'trial' && --trialLeft <= 0) enterSelect()
+    if (state == 'challenge') challengeUpdate()
+  }
+  updMs = lerp(updMs, now() - t0, 0.05)
+}
+
+function setState(s) { state = s; stateT = 0 }
+
+function worldUpdate() {
   playerInput(player)
   for (let i = 1; i < heroes.length; i++) aiBrain(heroes[i])
   for (let h of heroes) heroUpdate(h)
@@ -1092,24 +1128,191 @@ function _update() {
   if (frame % 1200 == 0) spawnChest(false)
   for (let p of props) { if (p.hitT > 0) p.hitT--; if (p.growT > 0) p.growT-- }
   cameraUpdate(player)
-  updMs = lerp(updMs, now() - t0, 0.05)
+}
+
+// ---- title
+
+function titleUpdate() {
+  camYaw += 0.0008
+  if (stateT < 20) return
+  if (btnp(4) || (DEBUG && btnp(5))) {
+    quick = DEBUG && btnp(5)                  // DEBUG: X starts a 30-second trial, to test the flow
+    newMatch()
+    if (quick) trialLeft = 30 * 60
+    setState('spawn'); sfx(S.chest)
+  }
+}
+
+// ---- challenge select (§10)
+
+const CHALLENGE_TYPES = ['boss', 'harvest', 'minions', 'royale', 'race']
+const HARVEST = { wood: 25, crop: 20, stone: 15 }
+let cards = [], cardSel = 0, navDir = 0
+
+function enterSelect() {
+  setState('select')
+  sfx(S.chest)
+  let pool = CHALLENGE_TYPES.slice().sort(() => rnd(1) - 0.5).slice(0, 3)
+  cards = pool.map((t) => {
+    let c = { type: t }
+    if (t == 'boss') { c.v = rnd([5, 6, 7, 8, 9, 10]); c.title = 'BOSS'; c.detail = 'BIG ' + MINIONS[c.v].name }
+    if (t == 'harvest') { c.cls = rnd(['wood', 'crop', 'stone']); c.n = HARVEST[c.cls]; c.title = 'HARVEST'; c.detail = 'break ' + c.n + ' ' + c.cls }
+    if (t == 'minions') { c.n = 15; c.title = 'MINION BATTLE'; c.detail = 'defeat 15 minions' }
+    if (t == 'royale') { c.title = 'BATTLE ROYALE'; c.detail = 'knock out all 3 rivals' }
+    if (t == 'race') { c.title = 'RACE'; c.detail = 'reach the flag' }
+    return c
+  })
+  cardSel = 0
+}
+
+function selectUpdate() {
+  if (stateT < 40) return                     // a beat, so a held button doesn't pick by accident
+  let n = cards.length + 1                    // the 3 cards, then ULTIMATE
+  let [sx, sy] = stick(0), dir = abs(sy) > 0.5 ? sgn(sy) : abs(sx) > 0.5 ? sgn(sx) : 0
+  if (dir && dir != navDir) { cardSel = (cardSel + n + dir) % n; sfx(S.step) }   // stick, d-pad or arrows
+  navDir = dir
+  if (btnp(4)) startChallenge(cardSel < cards.length ? [cards[cardSel]] : cards)
+}
+
+function bestKey(list) {
+  let k = list.map((c) => c.type).sort().join('+')
+  return list.length > 1 ? 'ult:' + k : k
+}
+
+// ---- challenges (§10)
+
+let ch = null                                 // the running challenge(s)
+
+function startChallenge(list) {
+  ch = { list, left: CHALLENGE_FRAMES, kills: 0, royale: false, royaleOut: 0, bossDown: false, boss: null,
+    broke0: {}, done: false, win: false, key: bestKey(list) }
+  for (let c of list) {
+    if (c.type == 'royale') ch.royale = true
+    if (c.type == 'harvest') {                // every prop of that class grows back now
+      for (let p of props) if (!p.alive && PROPS[p.kind].cls == c.cls && p.regrowAt) { p.alive = true; p.hp = PROPS[p.kind].hp; p.growT = 20; setPropSolid(p, true) }
+      ch.broke0[c.cls] = player.brokenCls[c.cls] || 0
+    }
+  }
+  // the race moves you first, so the boss and minion waves start around where you'll be
+  for (let c of list) if (c.type == 'race') {
+    let pairs = []
+    for (let a of flagSpots) for (let b of flagSpots) {
+      let d = dist([a[0], a[2]], [b[0], b[2]])
+      if (d >= 70 && d <= 100) pairs.push([a, b])
+    }
+    let [a, b] = pairs.length ? rnd(pairs) : [flagSpots[0], flagSpots[flagSpots.length - 1]]
+    player.x = a[0]; player.y = a[1] + R; player.z = a[2]; player.vx = player.vy = player.vz = 0
+    ch.flag = b
+    camYaw = player.yaw = yaw_to(b[0] - a[0], b[2] - a[2])
+  }
+  for (let c of list) {
+    if (c.type == 'boss') ch.boss = spawnBoss(c.v)
+    if (c.type == 'minions') { ch.waveT = 0; for (let m of minions) if (m.alive && !m.deep && dist([m.x, m.z], [player.x, player.z]) < 30) m.target = player }
+  }
+  for (let h of heroes) {
+    if (h === player) continue
+    if (!ch.royale) h.koT = 1e9                                   // rivals sit this one out
+    else if (h.koT > 0) { h.koT = 0; respawnHero(h) }             // everyone's in for the royale
+  }
+  player.iT = 60
+  setState('challenge')
+  sfx(S.chest)
+}
+
+// a level-6 version of a minion, three times the size, 12 blocks in front of you
+function spawnBoss(v) {
+  let d = MINIONS[v], [fx, , fz] = dir3(player.yaw), pos = null
+  for (let dd of [12, 9, 6, 4]) {
+    let x = player.x + fx * dd, z = player.z + fz * dd
+    if (player.y > 14) { let g = groundAt(x, z); if (g && abs(g[0] - player.y) < 6) { pos = [x, g[0], z]; break } }
+    else if (solidAt(x, player.y - 1, z) && !solidAt(x, player.y + 0.5, z)) { pos = [x, player.y - R, z]; break }
+  }
+  if (!pos) pos = [player.x + fx * 3, player.y - R, player.z + fz * 3]
+  let m = addMinion(v, pos[0], pos[1] + (d.atk == 'fly' ? 2 : 0), pos[2], 1, true)
+  m.boss = true
+  m.scale = d.scale * 3; m.r = min(1.4, 0.35 * m.scale)
+  m.y = pos[1] + m.r + (d.atk == 'fly' ? 2 : 0); m.home = [pos[0], m.y, pos[2]]
+  m.hp = m.maxhp = max(200, d.hp * 8); m.dmg = d.dmg * 2.5          // at least 200 HP, so a big bat is still a boss
+  m.target = player; m.growT = 40
+  return m
+}
+
+function goalsOf() {
+  let out = []
+  for (let c of ch.list) {
+    if (c.type == 'boss') out.push({ c, done: ch.bossDown, text: c.detail + (ch.bossDown ? '' : ' ' + flr(100 * max(0, ch.boss.hp) / ch.boss.maxhp) + '%') })
+    if (c.type == 'harvest') { let n = (player.brokenCls[c.cls] || 0) - ch.broke0[c.cls]; out.push({ c, done: n >= c.n, text: c.cls + ' ' + min(n, c.n) + '/' + c.n }) }
+    if (c.type == 'minions') out.push({ c, done: ch.kills >= c.n, text: 'minions ' + min(ch.kills, c.n) + '/' + c.n })
+    if (c.type == 'royale') out.push({ c, done: ch.royaleOut >= 3, text: 'rivals out ' + ch.royaleOut + '/3' })
+    if (c.type == 'race') { let d = dist([player.x, player.z], [ch.flag[0], ch.flag[2]]); ch.raceDone = ch.raceDone || (d < 1.6 && abs(player.y - R - ch.flag[1]) < 2); out.push({ c, done: ch.raceDone, text: ch.raceDone ? 'flag reached' : 'flag ' + flr(d) + 'm' }) }
+  }
+  return out
+}
+
+function challengeUpdate() {
+  if (ch.done) return
+  ch.left--
+  // minion battle: waves of 5 around you every 12 s
+  for (let c of ch.list) if (c.type == 'minions' && --ch.waveT <= 0) {
+    ch.waveT = 720
+    let q = quadOf(player.x, player.z), kinds = [[7, 5, 6], [8, 7], [7, 5], [9, 5]][q]
+    for (let i = 0; i < 5; i++) {
+      let a = i / 5 + rnd(0.1), x = player.x + cos(a) * 9, z = player.z + sin(a) * 9
+      let g = player.y > 14 ? groundAt(x, z) : null
+      let y = g ? g[0] : player.y - R
+      if (g && abs(g[0] - player.y) > 6) continue
+      let m = addMinion(rnd(kinds), x, y + (0), z, player.y > 14 ? 1 + flr(rnd(2)) : 3, true)
+      m.target = player
+    }
+  }
+  let goals = goalsOf()
+  if (goals.every((g) => g.done)) endChallenge(true)
+  else if (ch.left <= 0) endChallenge(false)
+}
+
+function endChallenge(win) {
+  if (ch.done) return
+  ch.done = true; ch.win = win
+  ch.used = (CHALLENGE_FRAMES - ch.left) / 60
+  ch.goals = goalsOf()
+  if (win) {
+    let old = bests[ch.key]
+    ch.newBest = old == null || ch.used < old
+    if (ch.newBest) { bests[ch.key] = ch.used; save({ bests }) }
+    sfx(S.chest)
+  } else sfx(S.ko)
+  setState('results')
+}
+
+function resultsUpdate() {
+  if (stateT > 60 && (btnp(4) || btnp(5))) { newMatch(); setState('title') }
 }
 
 function _draw() {
   let t0 = now()
   bg(12)
-  cameraDraw(player)
+  if (state == 'title') {
+    cam_orbit([64, 30, 64], camYaw, -0.16, 46)
+    camPos = [64 - sin(camYaw) * 46, 40, 64 - cos(camYaw) * 46]
+  } else cameraDraw(player)
   outline()                                   // maps without outlines
   for (let m of QUADS) map(m)
   outline(0, false)
   drawProps()
-  for (let h of heroes) if (h.koT == 0 && !(h.iT > 0 && h.iT < 100 && frame % 4 < 2 && h.hurtT == 0)) drawHero(h)
+  if (state != 'title') for (let h of heroes) if (h.koT == 0 && !(h.iT > 0 && h.iT < 100 && frame % 4 < 2 && h.hurtT == 0)) drawHero(h)
   drawMinions()
   drawPickups()
+  if (state == 'challenge' && ch.flag) drawFlag()
   outline()
   drawParticles()
   drawMs = lerp(drawMs, now() - t0, 0.05)
-  drawHud()
+  if (state == 'title') drawTitle()
+  else {
+    drawHud()
+    if (state == 'spawn') printc(stateT < 80 ? 'READY' : 'GO!', 100, stateT < 80 ? 10 : 11, 0, 4)
+    if (state == 'select') drawSelect()
+    if (state == 'results') drawResults()
+  }
 }
 
 // =================================================================== drawing
@@ -1119,8 +1322,9 @@ const DRAW_R = 40, DRAW_SMALL = 26        // draw distances: big props, small pr
 function drawProps() {
   drawn = 0
   let [fx, , fz] = dir3(camYaw)
-  let cx = player.x, cz = player.z
-  let under = player.y < 14                                    // in a dungeon: surface props are hidden, and the other way round
+  let F = state == 'title' ? { x: 64, y: 30, z: 64 } : player   // what the view is centered on
+  let cx = F.x, cz = F.z
+  let under = F.y < 14                                    // in a dungeon: surface props are hidden, and the other way round
   let b0x = max(0, flr((cx - DRAW_R) / 8)), b1x = min(15, flr((cx + DRAW_R) / 8))
   let b0z = max(0, flr((cz - DRAW_R) / 8)), b1z = min(15, flr((cz + DRAW_R) / 8))
   for (let bz = b0z; bz <= b1z; bz++) for (let bx = b0x; bx <= b1x; bx++) {
@@ -1273,6 +1477,58 @@ function drawParticles() {
   }
 }
 
+function drawTitle() {
+  printc('HERO TRIAL', 64, 10, 0, 3)
+  printc('a 5-minute roguelike', 104, 7, 0)
+  if (stateT % 60 < 40) printc('press O to start', 170, 7, 0)
+  if (DEBUG) printc('X: quick start (30 s trial)', 186, 6, 0)
+  let keys = Object.keys(bests)
+  if (keys.length) printc('best times saved: ' + keys.length, 210, 6, 0)
+}
+
+function drawSelect() {
+  rectfill(10, 40, 245, 236, 0)
+  rect(10, 40, 245, 236, 7)
+  printc('TIME! CHOOSE YOUR CHALLENGE', 48, 10, 0)
+  let all = cards.concat([{ title: 'ULTIMATE', detail: 'all three in 90 s', ult: true }])
+  for (let i = 0; i < all.length; i++) {
+    let c = all[i], y = 66 + i * 40, sel = i == cardSel
+    rectfill(18, y, 237, y + 34, sel ? (c.ult ? 2 : 1) : 0)
+    rect(18, y, 237, y + 34, sel ? (frame % 20 < 10 || stateT % 20 < 10 ? 10 : 7) : 5)
+    print(c.title, 26, y + 4, c.ult ? 14 : 7, 0)
+    print(c.detail, 26, y + 18, 6, 0)
+    let b = bests[c.ult ? bestKey(cards) : bestKey([c])]
+    if (b != null) print('best ' + b.toFixed(1) + 's', 236 - textw('best ' + b.toFixed(1) + 's'), y + 4, 11, 0)
+  }
+  printc('up/down choose   O go', 226, 6, 0)
+}
+
+function drawResults() {
+  rectfill(20, 50, 235, 220, 0)
+  rect(20, 50, 235, 220, ch.win ? 11 : 8)
+  printc(ch.win ? 'CHALLENGE CLEAR!' : 'FAILED', 60, ch.win ? 11 : 8, 0, 2)
+  let y = 90
+  for (let g of ch.goals) { print((g.done ? '+ ' : 'x ') + g.c.title + ': ' + g.text, 30, y, g.done ? 11 : 8, 0); y += 12 }
+  y += 6
+  if (ch.win) {
+    print('time ' + ch.used.toFixed(1) + 's' + (ch.newBest ? '  NEW BEST!' : '   best ' + bests[ch.key].toFixed(1) + 's'), 30, y, ch.newBest ? 10 : 7, 0)
+    y += 12
+  }
+  print('total stats ' + totalStats(player), 30, y, 7, 0)
+  if (stateT > 60) printc('O: back to title', 204, stateT % 60 < 40 ? 7 : 5, 0)
+}
+
+// the race's finish flag: a big flag and a beam you can see from far away
+function drawFlag() {
+  let [x, y, z] = ch.flag
+  vox(V.flag, x, y, z, 0, frame / 120, 0, 2)
+  for (let i = 0; i < 6; i++) line3(x + (i % 3 - 1) * 0.05, y + 2, z + (flr(i / 3) - 0.5) * 0.1, x, y + 40, z, frame % 10 < 5 ? 10 : 7)
+  if (!ch.raceDone) {                         // an arrow of dots over your head pointing at the flag
+    let a = yaw_to(x - player.x, z - player.z)
+    for (let i = 0; i < 4; i++) { let [ax, , az] = dir3(a); sphere(player.x + ax * (0.4 + i * 0.3), player.y + 1.1, player.z + az * (0.4 + i * 0.3), 0.08 + i * 0.02, 10) }
+  }
+}
+
 function fmtTime(f) { let s = ceil(f / 60); return flr(s / 60) + ':' + (s % 60 < 10 ? '0' : '') + s % 60 }
 
 function drawHud() {
@@ -1287,8 +1543,17 @@ function drawHud() {
   rectfill(3, 3, 6 + w, 11, 0)
   rectfill(5, 5, 5 + flr(w * max(0, h.hp) / mhp), 9, h.hp / mhp < 0.3 ? 8 : 11)
   print(flr(max(0, h.hp)) + '/' + mhp, 92, 3, 7, 0)
-  let tc = trialLeft < 600 && frame % 30 < 15 ? 8 : 7
-  print(trialLeft > 0 ? fmtTime(trialLeft) : 'TIME!', 214, 3, tc, 0)
+  let left = state == 'challenge' || state == 'results' ? ch.left : trialLeft
+  let tc = left < 600 && frame % 30 < 15 ? 8 : state == 'challenge' ? 10 : 7
+  print(left > 0 ? fmtTime(left) : 'TIME!', 214, 3, tc, 0)
+  if (state == 'challenge') {                  // the goals, ticked off as they're done
+    let y = 40
+    for (let g of goalsOf()) { print((g.done ? '+ ' : '- ') + g.text, 4, y, g.done ? 11 : 7, 0); y += 11 }
+    if (ch.boss && !ch.bossDown) {
+      rectfill(60, 222, 196, 228, 0)
+      rectfill(61, 223, 61 + flr(134 * max(0, ch.boss.hp) / ch.boss.maxhp), 227, 8)
+    }
+  }
 
   // stats: two rows of four
   for (let i = 0; i < 8; i++) {
@@ -1315,8 +1580,8 @@ function drawHud() {
     else rectfill(x + 1, 245, x + 1 + flr(116 * (1 - h.cd[k] / full)), 247, h.cd[k] ? 5 : 12)
   }
 
-  if (h.koT > 0) printc('KNOCKED OUT!', 110, 8, 0, 2)
-  if (DEBUG) {
+  if (h.koT > 0 && state != 'results') printc('KNOCKED OUT!', 110, 8, 0, 2)
+  if (DEBUG && state == 'trial') {
     print('fps ' + fps + ' props ' + drawn + ' upd ' + updMs.toFixed(2) + ' drw ' + drawMs.toFixed(2), 4, 40, 5, 0)
   }
 }
