@@ -1,4 +1,4 @@
-# Hero Trial — Accomplishment Board (draft 1)
+# Hero Trial — Accomplishment Board
 
 150 accomplishments for the board (DESIGN.md §17). Edit freely: change wording, numbers, or swap entries out. Each one is written so the game can check it from counters it already tracks.
 
@@ -72,7 +72,7 @@ Difficulty: ★ easy, ★★ takes some practice, ★★★ hard, ★★★★ v
 | 46 | Matching Set | Hold two of the same tool. | ★ |
 | 47 | Twin Platinum | Hold two platinum tools at once. | ★★★ |
 | 48 | Tool Shed | Hold every tool type at least once (lifetime). | ★★ |
-| 49 | Platinum Collection | Hold every platinum tool type at least once (lifetime). | ★★★ |
+| 49 | Platinum Collection | Hold all six platinum tools at least once (lifetime). | ★★★ |
 | 50 | Swap Meet | Pick up 10 tools in one trial. | ★★ |
 | 51 | Loyal | Finish a trial holding the first two tools you picked up. | ★★ |
 | 52 | Right Tool for the Job | Break a rock with a hammer, a log with an axe, and a crop with a hoe in one trial. | ★ |
@@ -168,7 +168,7 @@ Difficulty: ★ easy, ★★ takes some practice, ★★★ hard, ★★★★ v
 | 122 | Sweep | Hit 5 minions with one swing. | ★★ |
 | 123 | Meteor | Ground-pound a minion after falling 20+ blocks. | ★★ |
 | 124 | Comet | Knock out a hero with a ground pound. | ★★★ |
-| 125 | Double Tap | Defeat two minions on the same frame, one with each hand. | ★★ |
+| 125 | Double Tap | Defeat two minions with one ground pound, one with each hand. | ★★ |
 | 126 | Untouchable | Finish a trial without taking damage. | ★★★ |
 | 127 | Survivor | Finish a trial without being knocked out. | ★ |
 | 128 | Dungeon Master | Defeat every minion in one dungeon in one trial. | ★★★ |

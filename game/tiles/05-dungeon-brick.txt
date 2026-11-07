@@ -1,5 +1,14 @@
 name dungeon brick
 top
+55555555
+5mmm65mm
+5mmmm5mm
+5m6mm5m6
+55555555
+mm5mmmm6
+m65mmmmm
+mm5mm6mm
+side
 gllll5ll
 g5llll5l
 glll5lll
@@ -8,3 +17,12 @@ l5l5glll
 l5llglll
 llllgll5
 gggggggg
+bottom
+gggggggg
+ll5ll5ll
+ll5ll5ll
+gggggggg
+5ll5ll5l
+5ll5ll5l
+gggggggg
+ll5ll5ll

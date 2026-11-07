@@ -198,6 +198,8 @@ Every hittable thing has a **material**. Multiplier = `MAT[type][material]`.
 2. **Frame 1 (strike)**: the tool snaps to the end of its arc. All hits resolve on this frame.
 3. **Frames 2–7 (trail)**: 5 fading spheres along the arc, visual only.
 4. Cooldown starts at frame 1. Holding the button re-swings as soon as cooldown ends.
+5. **One cooldown for both hands**: while either hand is cooling down, neither can swing, so alternating buttons is no faster than holding one.
+6. **Swinging slows you**: while a swing is out or cooling down, walking speed is multiplied by `1 − weight × (1 − 0.025·Agility)`. Weights: hand 0, knife 0.05, whip 0.1, sword 0.2, hoe 0.2, spear 0.25, shovel 0.3, axe 0.35, hammer 0.5, mace 0.55. At Agility 30 the slowdown is a quarter of the tool's weight.
 
 **One hit test for everything.** Heroes, minions, props and powerups are all "hittables" with a position and radius. A target is hit if:
 - horizontal distance ≤ `reach + target.r`,
@@ -303,7 +305,7 @@ Three sources, so props can be placed by hand **or** fill an area without hand-p
 | Source | How | Used for |
 |---|---|---|
 | **Scene markers** | In scene 0, put a vox marker using the prop's model. At spawn, each marker becomes that prop. Markers of non-prop models mean other things (table below). | Chests, gold blocks, crystals, dig spots, anything placed on purpose |
-| **Tile rules** | At spawn, scan the maps once: on top of every **farmland** tile with air above, place a crop (corn 50 %, pumpkin 30 %, sprout 20 %). | Farms: paint farmland in the Map tab, crops appear |
+| **Tile rules** | At spawn, scan the maps once: each **farmland** tile with air above grows a crop with a 20 % chance (corn 55 %, pumpkin 30 %, sprout 15 %). | Farms: paint farmland in the Map tab, crops appear |
 | **Scatter zones** | A small table of rectangles in code, each with a prop mix and a count. Spots are chosen at random; the top surface is found with `mray` straight down, and spots on hazards, roofs or too-steep ground are skipped. | Rocks across the mountains, logs and bushes in the forest, grass tufts everywhere |
 
 Special marker models (not props):
@@ -644,7 +646,7 @@ Rule of thumb: game objects are plain objects in arrays (`heroes`, `minions`, `p
 | 3 | **Minions**: six types, spawning, levels, drops. | Minions fight back; dungeons are dangerous. **Done 2026-11-05** (see §18). |
 | 4 | **AI heroes**: brain, hero-vs-hero combat. | Three rivals visibly grow stronger over 5 minutes. **Done 2026-11-05** (see §18). |
 | 5 | **Match flow**: all states, timer, challenge select, five challenges, results. | A full match plays start to finish. **Done 2026-11-07** (see §18). |
-| 6 | **Persistence**: best times, accomplishment board and checks. | Times and accomplishments survive a reload. |
+| 6 | **Persistence**: best times, accomplishment board and checks. | Times and accomplishments survive a reload. **Done 2026-11-07** (see §18). |
 | 7 | **Polish**: art pass, sounds, music, HUD, title, export. | Playable on desktop, gamepad and phone. |
 
 ---
@@ -749,3 +751,19 @@ Tested headless over 2.5 minutes of trial: no rival fell off the world or got st
 Tested headless with a scripted player at 15 in every stat (sword + mace): Big Bat and Big Golem bosses (the golem knocked out a player who stood still swinging; that's a fail, as designed), Minion Battle cleared in 28.4 s, Battle Royale in 14.1 s, three races in 16–25 s, crop Harvest in 2.0 s, and an Ultimate that ran out of time at 90.0 s with 2 of 3 goals done.
 
 **Balance notes for later**: a Reach-15 sword mows 20 crops in 2 s (the farm again); a 64-HP Big Bat died in 1.8 s before the 200-HP floor.
+
+### Milestone 6 (2026-11-07)
+
+Rocco's changes, made first:
+- **One cooldown for both hands** (§7.3): alternating O and X now gives 17 swings in 4 s with bare hands, the same as holding one button (18); before, it was twice as fast.
+- **Swinging slows walking** (§7.3) by the tool's weight, eased by Agility: a 5-second walk while holding a hammer swing covers 7.9 blocks at Agility 0 and 13.0 at Agility 30 (15.8 bare-handed; the hammer's −6 Speed still applies on top).
+- **Farmland grows a crop on 20 % of tiles** (was every tile). The map is unchanged.
+- **Dungeon brick** has a lighter flagstone floor (top) and a ribbed ceiling (bottom); the sides are still brick.
+
+Accomplishments:
+- All 150 from `ACCOMPLISHMENTS.md` are checked in game: lifetime counters (`L`, saved) and this match's counters (`RUN`), filled in by small hooks (breaking, kills, knockouts, collecting, tools, swings, pounds, challenge results) and a per-frame tracker for places and movement (dungeons, quadrants, tower, summit, corners, falls, glides, jumps). Checks run every 15 frames, when the trial ends and when a challenge ends.
+- Earned ones show an "ACCOMPLISHMENT!" banner and are saved right away. The save is `{ bests, ach: "0101…" (150 flags), life: {...} }`.
+- Title is now a menu: START, ACCOMPLISHMENTS, and (in DEBUG) QUICK START. The board is a 15 × 10 grid colored by category; move the cursor with the stick/arrows to read each one (number, category, stars, name, description); O or X goes back.
+- Two descriptions changed to match the game: #49 is "all six platinum tools" (only six exist), and #125 Double Tap is done with a ground pound (the only way both hands strike at once now).
+
+Tested headless: a scripted Minion Battle earned 19 accomplishments (some only because the test set all stats to 15), the save held the best time, the 150 flags and the lifetime counters.

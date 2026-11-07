@@ -1,4 +1,4 @@
-// HERO TRIAL — milestone 5: the whole match (title, 5-minute trial, challenges, results) on top of milestones 1-4.
+// HERO TRIAL — milestone 6: the accomplishment board and saving, on top of the whole match (milestones 1-5).
 // Design: DESIGN.md in the repo root. Section numbers below (§) point into it.
 
 // =================================================================== 1. constants & tables
@@ -25,18 +25,19 @@ const STAT_ABBR = ['SPD', 'STR', 'HP', 'DEF', 'FRQ', 'RCH', 'AGI', 'JMP']
 const STAT_COL = [12, 8, 11, 6, 10, 13, 9, 14]
 const POW_VOX = 32                           // powerup icon for stat i is vox 32 + i
 
-// tools (§7.1). dmg, reach (blocks), arc (turns), cd (frames), damage types, stat offsets while held
+// tools (§7.1). weight: how much swinging slows your walk (0-1, eased by Agility); dmg, reach (blocks),
+// arc (turns), cd (frames), damage types, stat offsets while held
 const TOOLS = [
-  { name: 'HAND',   vox: -1, dmg: 2,  reach: 0.9, arc: 0.25, cd: 14, types: ['normal'] },
-  { name: 'SWORD',  vox: 16, dmg: 6,  reach: 1.6, arc: 0.33, cd: 22, types: ['cut'] },
-  { name: 'HAMMER', vox: 17, dmg: 9,  reach: 1.5, arc: 0.33, cd: 45, types: ['smash'], mods: { speed: -6, agility: -6 } },
-  { name: 'AXE',    vox: 18, dmg: 8,  reach: 1.3, arc: 0.33, cd: 40, types: ['chop'], flesh: 1.5 },
-  { name: 'SPEAR',  vox: 19, dmg: 6,  reach: 2.6, arc: 0.12, cd: 28, types: ['cut'] },
-  { name: 'KNIFE',  vox: 20, dmg: 3,  reach: 0.9, arc: 0.33, cd: 9,  types: ['cut'], mods: { speed: 4, agility: 4 } },
-  { name: 'WHIP',   vox: 21, dmg: 2,  reach: 2.6, arc: 0.25, cd: 26, types: ['normal'], collect: 1.5 },
-  { name: 'MACE',   vox: 22, dmg: 11, reach: 1.5, arc: 0.25, cd: 50, types: ['smash'] },
-  { name: 'SHOVEL', vox: 23, dmg: 7,  reach: 1.3, arc: 0.12, cd: 30, types: ['smash', 'dig'], low: true },
-  { name: 'HOE',    vox: 24, dmg: 3,  reach: 1.3, arc: 0.33, cd: 24, types: ['harvest'] },
+  { name: 'HAND', weight: 0,   vox: -1, dmg: 2,  reach: 0.9, arc: 0.25, cd: 14, types: ['normal'] },
+  { name: 'SWORD', weight: 0.2,  vox: 16, dmg: 6,  reach: 1.6, arc: 0.33, cd: 22, types: ['cut'] },
+  { name: 'HAMMER', weight: 0.5, vox: 17, dmg: 9,  reach: 1.5, arc: 0.33, cd: 45, types: ['smash'], mods: { speed: -6, agility: -6 } },
+  { name: 'AXE', weight: 0.35,    vox: 18, dmg: 8,  reach: 1.3, arc: 0.33, cd: 40, types: ['chop'], flesh: 1.5 },
+  { name: 'SPEAR', weight: 0.25,  vox: 19, dmg: 6,  reach: 2.6, arc: 0.12, cd: 28, types: ['cut'] },
+  { name: 'KNIFE', weight: 0.05,  vox: 20, dmg: 3,  reach: 0.9, arc: 0.33, cd: 9,  types: ['cut'], mods: { speed: 4, agility: 4 } },
+  { name: 'WHIP', weight: 0.1,   vox: 21, dmg: 2,  reach: 2.6, arc: 0.25, cd: 26, types: ['normal'], collect: 1.5 },
+  { name: 'MACE', weight: 0.55,   vox: 22, dmg: 11, reach: 1.5, arc: 0.25, cd: 50, types: ['smash'] },
+  { name: 'SHOVEL', weight: 0.3, vox: 23, dmg: 7,  reach: 1.3, arc: 0.12, cd: 30, types: ['smash', 'dig'], low: true },
+  { name: 'HOE', weight: 0.2,    vox: 24, dmg: 3,  reach: 1.3, arc: 0.33, cd: 24, types: ['harvest'] },
 ]
 const TOOL_OF_VOX = {}
 for (let i = 1; i < TOOLS.length; i++) TOOL_OF_VOX[TOOLS[i].vox] = i
@@ -91,6 +92,7 @@ const ZONES = [
   { r: [66, 4, 123, 61],   n: 8,   mix: { boulder: 1 } },                                                        // mountain boulders
   { r: [44, 44, 83, 83],   n: 30,  mix: { tuft: 3, bush: 1, crate: 1, sandpile: 1 } },                          // around the hub
 ]
+const CROP_CHANCE = 0.2                     // each farmland tile grows a crop with this chance
 const EXTRA_TOOLS = 12                      // random loose tools at match start, besides the scene's tool markers
 
 // minions (§8.7), by vox number. speed in blocks/frame, aggro in blocks; atk: how it fights
@@ -126,7 +128,7 @@ let scene, WORLD, QUADS, PROPMAP
 let props = []                              // every prop record
 let grid = {}                               // spatial grid: bucket key -> props in it (8 x 8 blocks)
 let propAt = {}                             // cellKey -> prop (one prop per cell; big props fill several keys)
-let spawns = [], chestSpots = [], minionSpots = [], flagSpots = []
+let spawns = [], chestSpots = [], minionSpots = [], flagSpots = [], SUMMIT = null
 
 const cellKey = (x, y, z) => x + WORLD_W * (y + WORLD_H * z)
 const bucketKey = (x, z) => (x >> 3) + 16 * (z >> 3)
@@ -161,11 +163,12 @@ function buildWorld() {
     else if (v == V.chestSpot) chestSpots.push([flr(x), flr(y + 0.01), flr(z)])
     else if (v == V.flag) flagSpots.push([x, y, z])
     else if (MINIONS[v]) {
-      if (y < 14) addMinion(v, x, y, z, 3, true)                // dungeon garrison: level 3, never respawns
+      if (y < 14) addMinion(v, x, y, z, 3, true).garrison = quadOf(x, z)   // dungeon garrison: level 3, never respawns
       else minionSpots.push([v, x, y, z])                          // a surface spawn point
     }
     else if (TOOL_OF_VOX[v]) {
       let plat = mgetw(QUADS[quadOf(x, z)], x, y - 0.5, z)[0] == T.gold         // on a gold block: platinum
+      if (plat && v == 22) SUMMIT = [x, y, z]                                    // the mace sits on the mountain peak
       addPickup('tool', x, y, z, { t: TOOL_OF_VOX[v], plat })
     }
     else if (PROP_OF_VOX[v]) addProp(PROP_OF_VOX[v], flr(x), flr(y + 0.01), flr(z), v, yaw)
@@ -174,7 +177,7 @@ function buildWorld() {
   // tile rule: crops on every farmland tile with air above
   for (let z = 0; z < WORLD_D; z++) for (let x = 0; x < WORLD_W; x++) {
     let g = groundAt(x + 0.5, z + 0.5)
-    if (g && g[1] == T.farmland) {
+    if (g && g[1] == T.farmland && rnd(1) < CROP_CHANCE) {
       let r = rnd(1)
       addProp(r < 0.55 ? 'corn' : r < 0.85 ? 'pumpkin' : 'sprout', x, g[0], z)
     }
@@ -273,6 +276,7 @@ function breakProp(p, h) {
   debris(cx, cy, cz, 8, propColor(p), 0.12)
   sfx(S.brk)
   if (h) { h.broken++; if (k.cls) h.brokenCls[k.cls] = (h.brokenCls[k.cls] || 0) + 1 }
+  if (h === player) achBreak(p)
   if (rnd(1) < k.drop) {
     let n = k.n[0] + flr(rnd(k.n[1] - k.n[0] + 1))
     for (let i = 0; i < n; i++) dropPowerup(cx, cy, cz)
@@ -384,6 +388,7 @@ function heroUpdate(h) {
       if (h.grounded && h.pressT[1 - k] <= CHORD && !h.chordLock) {      // second button of a chord: jump
         h.vy = jumpVel(stat(h, 'jump')); h.grounded = false; h.hop = true
         h.chordLock = true; sfx(S.jump)
+        if (h === player) RUN.jumped = true
       }
       h.pressT[k] = 0
     } else h.pressT[k]++
@@ -396,7 +401,7 @@ function heroUpdate(h) {
     if (h.swingT[k] == 1) strike(h, k)                                  // frame 0 winds up, frame 1 hits (§7.3)
     if (h.cd[k] > 0) h.cd[k]--
     let quiet = h.holdT[k] > PICKUP_QUIET
-    if (h.grounded && !h.chordLock && h.cd[k] == 0 && !quiet && (c.bp[k] || c.b[k])) startSwing(h, k)
+    if (h.grounded && !h.chordLock && h.cd[0] == 0 && h.cd[1] == 0 && !quiet && (c.bp[k] || c.b[k])) startSwing(h, k)   // one cooldown for both hands
   }
   h.flapping = !h.grounded && c.b[0] && !h.chordLock && h.vy < 0
   if (!h.grounded && c.bp[1] && !h.chordLock && !h.pounding) {
@@ -405,7 +410,7 @@ function heroUpdate(h) {
 
   // ---- walking, camera-relative (§5)
   let sx = c.sx, sy = c.sy
-  let spd = maxSpeed(stat(h, 'speed'))
+  let spd = maxSpeed(stat(h, 'speed')) * (1 - swingSlow(h))
   let ax = (fx * -sy - fz * sx) * spd, az = (fz * -sy + fx * sx) * spd
   let tr = traction(stat(h, 'agility')) * (h.grounded ? 1 : 0.35)
   if (h.pounding) tr = 0
@@ -474,7 +479,14 @@ function startSwing(h, k) {
   let tl = toolOf(h, k), plat = h.tools[k] && h.tools[k].plat
   h.swingT[k] = 0
   h.swingDir[k] = -h.swingDir[k]            // alternate the arc's direction each swing
-  h.cd[k] = max(4, flr(tl.cd * (1 - 0.02 * stat(h, 'frequency')) * (plat ? 0.8 : 1)))
+  h.cd[k] = h.cdFull = max(4, flr(tl.cd * (1 - 0.02 * stat(h, 'frequency')) * (plat ? 0.8 : 1)))
+}
+
+// walking slows while a swing is out or cooling down: by the tool's weight, eased by Agility
+function swingSlow(h) {
+  let w = 0
+  for (let k = 0; k < 2; k++) if (h.cd[k] > 0 || h.swingT[k] < 2) w = max(w, toolOf(h, k).weight)
+  return w * (1 - 0.025 * stat(h, 'agility'))
 }
 
 // reach and arc for a hand, after stats (§6)
@@ -487,6 +499,7 @@ function strike(h, k, mulIn) {
   let reach = reachOf(h, k), half = arcOf(h, k) / 2
   let mul = (1 + 0.1 * stat(h, 'strength')) * (plat ? 1.5 : 1) * (mulIn || 1)
   let lo = tl.low ? -2.1 : -1.1, hits = 0, big = false          // reach a block down (the shovel two)
+  strikeCtx = h === player ? { k, t: h.tools[k] ? h.tools[k].t : 0, pound: !!mulIn, drop: mulIn ? h.poundY - h.y : 0, minions: 0, broken: 0 } : null
   let inArc = (x, y, z, r) => {
     let dx = x - h.x, dz = z - h.z, d = sqrt(dx * dx + dz * dz), dy = y - h.y
     if (d > reach + r || dy < lo || dy > 1.2) return false
@@ -518,6 +531,7 @@ function strike(h, k, mulIn) {
     if (!m.alive || !inArc(m.x, m.y, m.z, m.r)) continue
     let dmg = tl.dmg * mul * mm('flesh') * (tl.flesh || 1)
     hurtMinion(m, dmg, h); hits++
+    if (strikeCtx) strikeCtx.minions++
     if (dmg >= 15) big = true
   }
   // other heroes
@@ -533,12 +547,17 @@ function strike(h, k, mulIn) {
   for (let q of pickups) {
     if (q.kind == 'tool' || q.dead) continue
     let dx = q.x - h.x, dz = q.z - h.z, d = sqrt(dx * dx + dz * dz), dy = q.y - h.y
-    if (d <= creach + 0.3 && dy > lo - 0.5 && dy < 1.5 && (d < 0.6 || abs(angdiff(h.yaw, yaw_to(dx, dz))) <= half + 0.05)) collect(h, q)
+    if (d <= creach + 0.3 && dy > lo - 0.5 && dy < 1.5 && (d < 0.6 || abs(angdiff(h.yaw, yaw_to(dx, dz))) <= half + 0.05)) {
+      collect(h, q)
+      if (q.dead && h === player && tl === TOOLS[6]) RUN.whipCollect++
+    }
   }
   if (hits) {
     sfx(S.hit)
     if (h === player) { shake = max(shake, big ? 5 : 2); freeze(big ? 4 : 2) }
   }
+  if (strikeCtx) { if (strikeCtx.minions >= 5) RUN.sweep = true; if (strikeCtx.broken >= 10) RUN.clearCut = true }
+  strikeCtx = null
 }
 
 function poundLand(h) {
@@ -546,12 +565,15 @@ function poundLand(h) {
   h.pounding = false
   h.landT = 12
   h.poundMul = min(4, 1 + 0.15 * drop)
+  if (h === player) L.pounds++
   // both hands swing at once with the pound bonus, and whatever is right under the feet is hit too (§4.5)
   for (let k = 0; k < 2; k++) { h.swingT[k] = 1; h.swingDir[k] = -h.swingDir[k]; strike(h, k, h.poundMul) }
   let under = propAt[cellKey(flr(h.x), flr(h.y - R - 0.5), flr(h.z))]      // a prop we landed on
   if (under && under.alive) {
     let tl = toolOf(h, 1)
+    if (h === player) strikeCtx = { k: 1, t: h.tools[1] ? h.tools[1].t : 0, pound: true, drop, minions: 0, broken: 0 }
     hitProp(under, tl.dmg * (1 + 0.1 * stat(h, 'strength')) * h.poundMul * 2, h)
+    strikeCtx = null
   }
   debris(h.x, h.y - R, h.z, 10, 6, 0.1)
   if (h === player) shake = min(10, 3 + drop * 0.3)
@@ -566,11 +588,14 @@ function hurtHero(o, raw, from) {
   if (dmg <= 0) { sfx(S.clink); return }
   o.hp -= dmg
   o.iT = 30; o.hurtT = 12
+  o.lastHitBy = from
+  if (o === player) RUN.damaged = true
+  if (from === player) RUN.hitHero = true
   if (from) {
     let dx = o.x - from.x, dz = o.z - from.z, m = sqrt(dx * dx + dz * dz) || 1
     let kb = 0.15 * (1 + dmg / 20)
     o.vx += dx / m * kb; o.vz += dz / m * kb; o.vy = 0.08; o.grounded = false
-    if (from.stats) spillPowerups(o, 1)     // City Trial: every hit from a hero knocks one out (§7.4)
+    if (from.stats) { if (from === player && totalStats(o) > 0) RUN.pickpocket++; spillPowerups(o, 1) }   // City Trial: every hit from a hero knocks one out (§7.4)
   }
   sfx(S.hurt)
   if (o.hp <= 0) knockOut(o, false)
@@ -578,6 +603,7 @@ function hurtHero(o, raw, from) {
 
 function knockOut(h, fell) {
   if (h.koT > 0) return
+  achKnockOut(h, fell)
   if (state == 'challenge') {
     if (h === player) { debris(h.x, h.y, h.z, 14, h.color, 0.15); sfx(S.ko); h.koT = 1e9; endChallenge(false); return }
     if (ch.royale) { ch.royaleOut++; debris(h.x, h.y, h.z, 14, h.color, 0.15); sfx(S.ko); h.koT = 1e9; return }   // out for good
@@ -600,7 +626,7 @@ function knockOut(h, fell) {
 function respawnHero(h) {
   h.x = HUB[0] + rnd(2) - 1; h.y = HUB[1] + 1; h.z = HUB[2] + rnd(2) - 1
   h.vx = h.vy = h.vz = 0; h.pounding = false
-  h.hp = maxHP(h.stats.health); h.iT = 120
+  h.hp = maxHP(h.stats.health); h.iT = 120; h.lastHitBy = null
 }
 
 // take n random powerups away from a hero and throw them out as loose pickups
@@ -739,6 +765,7 @@ function separateMinions() {
 }
 
 function hurtMinion(m, dmg, from) {
+  if (m.boss && from === player && ch) ch.bossHits++
   m.hp -= dmg
   m.hurtT = 8
   m.target = from
@@ -762,6 +789,7 @@ function killMinion(m, h) {
   sfx(S.ko)
   if (h && h.kills != null) h.kills++
   if (h === player && state == 'challenge') ch.kills++
+  if (h === player) achKill(m)
 }
 
 // dead surface minions come back after a while, at a spawn point the player can't see
@@ -816,6 +844,7 @@ function spawnAmbientPowerup() {
 function collect(h, q) {
   if (q.dead || frame - q.born < 20 && !q.rest) return    // just popped out: a moment before it can be grabbed
   q.dead = true
+  if (h === player) achCollect(q)
   if (q.kind == 'pow') { gainStat(h, q.stat); if (h === player) sfx(S.pow) }
   else if (q.kind == 'heart') {
     h.hp = min(maxHP(h.stats.health), h.hp + maxHP(h.stats.health) * 0.25)
@@ -825,6 +854,7 @@ function collect(h, q) {
 
 function pickUpTool(h, k, q) {
   if (!q || q.dead) return
+  if (h === player) achTool(q.tool)
   let old = h.tools[k]
   h.tools[k] = q.tool
   q.dead = true
@@ -1075,6 +1105,9 @@ function _init() {
   mouse_set_mode(2)
   let data = load()
   if (data && data.bests) bests = data.bests
+  L = Object.assign(freshLife(), data && data.life || {})
+  earned = []
+  if (data && data.ach) for (let i = 0; i < data.ach.length; i++) earned[i + 1] = data.ach[i] == '1'
   newMatch()
   state = 'title'; stateT = 0
 }
@@ -1091,6 +1124,7 @@ function newMatch() {
   player.yaw = camYaw
   for (let h of heroes) h.yaw = h.aim = yaw_to(64 - h.x, 64 - h.z)
   ch = null
+  RUN = freshRun()
 }
 
 let updMs = 0, drawMs = 0                    // DEBUG: smoothed CPU time of _update and _draw
@@ -1102,6 +1136,7 @@ function _update() {
   if (state == 'title') titleUpdate()
   else if (state == 'spawn') { if (stateT >= 120) setState('trial') }
   else if (state == 'select') selectUpdate()
+  else if (state == 'board') boardUpdate()
   else if (state == 'results') resultsUpdate()
   else {                                     // trial or challenge: the world runs
     frame++
@@ -1118,6 +1153,7 @@ function worldUpdate() {
   playerInput(player)
   for (let i = 1; i < heroes.length; i++) aiBrain(heroes[i])
   for (let h of heroes) heroUpdate(h)
+  achTick()
   for (let m of minions) if (m.alive) minionUpdate(m)
   separateMinions()
   if (frame % 30 == 0) respawnMinions()
@@ -1132,15 +1168,34 @@ function worldUpdate() {
 
 // ---- title
 
+const TITLE_MENU = ['START', 'ACCOMPLISHMENTS'].concat(DEBUG ? ['QUICK START (30 s trial)'] : [])
+let titleSel = 0
+
 function titleUpdate() {
   camYaw += 0.0008
   if (stateT < 20) return
-  if (btnp(4) || (DEBUG && btnp(5))) {
-    quick = DEBUG && btnp(5)                  // DEBUG: X starts a 30-second trial, to test the flow
-    newMatch()
-    if (quick) trialLeft = 30 * 60
-    setState('spawn'); sfx(S.chest)
-  }
+  let [, sy] = stick(0), dir = abs(sy) > 0.5 ? sgn(sy) : 0
+  if (dir && dir != navDir) { titleSel = (titleSel + TITLE_MENU.length + dir) % TITLE_MENU.length; sfx(S.step) }
+  navDir = dir
+  if (!btnp(4)) return
+  let item = TITLE_MENU[titleSel]
+  if (item == 'ACCOMPLISHMENTS') { setState('board'); boardSel = 0; sfx(S.step); return }
+  quick = item != 'START'                     // DEBUG: a 30-second trial, to test the flow
+  newMatch()
+  if (quick) trialLeft = 30 * 60
+  setState('spawn'); sfx(S.chest)
+}
+
+// ---- the accomplishment board: 15 x 10 squares, one per accomplishment
+let boardSel = 0
+
+function boardUpdate() {
+  camYaw += 0.0008
+  let [sx, sy] = stick(0)
+  let dx = abs(sx) > 0.5 ? sgn(sx) : 0, dy = abs(sy) > 0.5 ? sgn(sy) : 0, key = dx + dy * 3
+  if (key && key != navDir) { boardSel = (boardSel + dx + dy * 15 + 150) % 150; sfx(S.step) }
+  navDir = key
+  if (stateT > 10 && (btnp(5) || btnp(4))) { setState('title'); sfx(S.step) }
 }
 
 // ---- challenge select (§10)
@@ -1150,6 +1205,8 @@ const HARVEST = { wood: 25, crop: 20, stone: 15 }
 let cards = [], cardSel = 0, navDir = 0
 
 function enterSelect() {
+  L.trials++
+  achCheck('trial')
   setState('select')
   sfx(S.chest)
   let pool = CHALLENGE_TYPES.slice().sort(() => rnd(1) - 0.5).slice(0, 3)
@@ -1185,7 +1242,9 @@ let ch = null                                 // the running challenge(s)
 
 function startChallenge(list) {
   ch = { list, left: CHALLENGE_FRAMES, kills: 0, royale: false, royaleOut: 0, bossDown: false, boss: null,
-    broke0: {}, done: false, win: false, key: bestKey(list) }
+    broke0: {}, done: false, win: false, key: bestKey(list), bossHits: 0,
+    underdog: heroes.every((o) => o === player || totalStats(o) > totalStats(player)) }
+  if (list.length > 1) L.ultTries++
   for (let c of list) {
     if (c.type == 'royale') ch.royale = true
     if (c.type == 'harvest') {                // every prop of that class grows back now
@@ -1278,9 +1337,11 @@ function endChallenge(win) {
   if (win) {
     let old = bests[ch.key]
     ch.newBest = old == null || ch.used < old
-    if (ch.newBest) { bests[ch.key] = ch.used; save({ bests }) }
+    if (ch.newBest) bests[ch.key] = ch.used
     sfx(S.chest)
   } else sfx(S.ko)
+  achChallenge(win)
+  saveAll()
   setState('results')
 }
 
@@ -1291,7 +1352,7 @@ function resultsUpdate() {
 function _draw() {
   let t0 = now()
   bg(12)
-  if (state == 'title') {
+  if (state == 'title' || state == 'board') {
     cam_orbit([64, 30, 64], camYaw, -0.16, 46)
     camPos = [64 - sin(camYaw) * 46, 40, 64 - cos(camYaw) * 46]
   } else cameraDraw(player)
@@ -1299,7 +1360,7 @@ function _draw() {
   for (let m of QUADS) map(m)
   outline(0, false)
   drawProps()
-  if (state != 'title') for (let h of heroes) if (h.koT == 0 && !(h.iT > 0 && h.iT < 100 && frame % 4 < 2 && h.hurtT == 0)) drawHero(h)
+  if (state != 'title' && state != 'board') for (let h of heroes) if (h.koT == 0 && !(h.iT > 0 && h.iT < 100 && frame % 4 < 2 && h.hurtT == 0)) drawHero(h)
   drawMinions()
   drawPickups()
   if (state == 'challenge' && ch.flag) drawFlag()
@@ -1307,12 +1368,384 @@ function _draw() {
   drawParticles()
   drawMs = lerp(drawMs, now() - t0, 0.05)
   if (state == 'title') drawTitle()
+  else if (state == 'board') drawBoard()
   else {
     drawHud()
     if (state == 'spawn') printc(stateT < 80 ? 'READY' : 'GO!', 100, stateT < 80 ? 10 : 11, 0, 4)
     if (state == 'select') drawSelect()
     if (state == 'results') drawResults()
+    drawAchPopup()
   }
+}
+
+// generated from ACCOMPLISHMENTS.md: [name, description, stars]
+const ACH_TEXT = [
+  ["First Steps", "Finish your first trial.", 1],
+  ["Victory!", "Win your first challenge.", 1],
+  ["Power Up", "Collect your first powerup.", 1],
+  ["Two-Handed", "Hold a tool in each hand.", 1],
+  ["Smash!", "Break your first prop.", 1],
+  ["Treasure", "Break open your first chest.", 1],
+  ["Monster Hunter", "Defeat your first minion.", 1],
+  ["Rival", "Knock out an AI hero for the first time.", 1],
+  ["Belly Flop", "Land your first ground pound.", 1],
+  ["Flight Lessons", "Flap for 3 seconds in one fall.", 1],
+  ["Shiny", "Pick up a platinum tool.", 2],
+  ["Heartfelt", "Pick up a heart.", 1],
+  ["Down Under", "Enter a dungeon.", 1],
+  ["Ouch", "Get knocked out for the first time.", 1],
+  ["Ultimate Rookie", "Attempt the Ultimate Challenge.", 1],
+  ["Getting Stronger", "Reach 25 total stats in one trial.", 1],
+  ["Hero Material", "Reach 50 total stats in one trial.", 2],
+  ["Legendary", "Reach 100 total stats in one trial.", 3],
+  ["Mythic", "Reach 150 total stats in one trial.", 4],
+  ["Speed Demon", "Max out Speed (30) in one trial.", 3],
+  ["Muscle", "Max out Strength (30) in one trial.", 3],
+  ["Tank", "Max out Health (30) in one trial.", 3],
+  ["Iron Skin", "Max out Defense (30) in one trial.", 3],
+  ["Flurry", "Max out Frequency (30) in one trial.", 3],
+  ["Long Arms", "Max out Reach (30) in one trial.", 3],
+  ["Nimble", "Max out Agility (30) in one trial.", 3],
+  ["Sky High", "Max out Jump (30) in one trial.", 3],
+  ["Well Rounded", "Have every stat at 8 or more in one trial.", 2],
+  ["Perfectly Balanced", "Have every stat at 15 or more in one trial.", 4],
+  ["Specialist", "Have one stat at 20+ while every other stat is 3 or less.", 3],
+  ["Collector", "Collect 100 powerups (lifetime).", 1],
+  ["Hoarder", "Collect 1,000 powerups (lifetime).", 2],
+  ["Dragon's Hoard", "Collect 10,000 powerups (lifetime).", 3],
+  ["Vacuum", "Collect 10 powerups within 3 seconds.", 2],
+  ["Bounce Back", "Lose powerups to a knockout, then finish the trial with more total stats than before it.", 2],
+  ["Sword Saint", "Win a challenge holding a sword.", 1],
+  ["Hammer Time", "Win a challenge holding a hammer.", 1],
+  ["Lumberjack", "Win a challenge holding an axe.", 1],
+  ["Pointy End", "Win a challenge holding a spear.", 1],
+  ["Pocket Rocket", "Win a challenge holding a pocket knife.", 1],
+  ["Crack the Whip", "Win a challenge holding a whip.", 1],
+  ["Heavy Hitter", "Win a challenge holding a mace.", 1],
+  ["Dig Deep", "Win a challenge holding a shovel.", 1],
+  ["Farmer", "Win a challenge holding a hoe.", 1],
+  ["Bare Knuckles", "Win a challenge with both hands empty.", 2],
+  ["Matching Set", "Hold two of the same tool.", 1],
+  ["Twin Platinum", "Hold two platinum tools at once.", 3],
+  ["Tool Shed", "Hold every tool type at least once (lifetime).", 2],
+  ["Platinum Collection", "Hold all six platinum tools at least once (lifetime).", 3],
+  ["Swap Meet", "Pick up 10 tools in one trial.", 2],
+  ["Loyal", "Finish a trial holding the first two tools you picked up.", 2],
+  ["Right Tool for the Job", "Break a rock with a hammer, a log with an axe, and a crop with a hoe in one trial.", 1],
+  ["Wrong Tool for the Job", "Break a boulder with a hoe.", 2],
+  ["Whip Collector", "Collect 50 powerups with whip swings in one trial.", 2],
+  ["Shovel Knight", "Find 5 dig spots in one trial.", 3],
+  ["Boss Slayer", "Win a Boss challenge.", 1],
+  ["Harvester", "Win a Harvest challenge.", 1],
+  ["Exterminator", "Win a Minion Battle challenge.", 1],
+  ["Last Hero Standing", "Win a Battle Royale challenge.", 2],
+  ["Racer", "Win a Race challenge.", 1],
+  ["All-Rounder", "Win every challenge type at least once.", 2],
+  ["ULTIMATE", "Win the Ultimate Challenge.", 3],
+  ["Ultimate \u00d75", "Win the Ultimate Challenge 5 times.", 3],
+  ["Ultimate \u00d725", "Win the Ultimate Challenge 25 times.", 4],
+  ["Big Goblin", "Defeat a Big Goblin boss.", 1],
+  ["Big Slime", "Defeat a Big Slime boss.", 1],
+  ["Big Bat", "Defeat a Big Bat boss.", 2],
+  ["Big Skeleton", "Defeat a Big Skeleton boss.", 2],
+  ["Big Golem", "Defeat a Big Golem boss.", 3],
+  ["Big Mushroom", "Defeat a Big Mushroom boss.", 2],
+  ["Boss Rush", "Defeat every boss type (lifetime).", 3],
+  ["Wood Harvest", "Win a wood Harvest challenge.", 1],
+  ["Crop Harvest", "Win a crop Harvest challenge.", 1],
+  ["Stone Harvest", "Win a stone Harvest challenge.", 1],
+  ["Streak", "Win 3 challenges in a row.", 2],
+  ["Hot Streak", "Win 10 challenges in a row.", 3],
+  ["Close Call", "Win a challenge with less than 1 second left.", 2],
+  ["Barely Alive", "Win a challenge with less than 10 % HP.", 2],
+  ["Royal Ultimate", "Win an Ultimate that includes Battle Royale.", 3],
+  ["Gauntlet", "Win an Ultimate that includes Boss, Minion Battle and Battle Royale.", 4],
+  ["Quick Kill", "Win a Boss challenge in under 45 s.", 2],
+  ["Boss Blitz", "Win a Boss challenge in under 20 s.", 3],
+  ["One Shot Wonder", "Defeat a boss with a single hit.", 4],
+  ["Speed Harvest", "Win a Harvest challenge in under 45 s.", 2],
+  ["Combine Harvester", "Win a Harvest challenge in under 20 s.", 3],
+  ["Rampage", "Win a Minion Battle in under 45 s.", 2],
+  ["Massacre", "Win a Minion Battle in under 20 s.", 3],
+  ["Fast Royale", "Win a Battle Royale in under 45 s.", 2],
+  ["Flash Royale", "Win a Battle Royale in under 20 s.", 3],
+  ["Sprinter", "Win a Race in under 45 s.", 2],
+  ["Blur", "Win a Race in under 25 s.", 3],
+  ["Quick Ultimate", "Win the Ultimate Challenge in under 75 s.", 3],
+  ["Lightning Ultimate", "Win the Ultimate Challenge in under 60 s.", 4],
+  ["Cross Country", "Walk from one corner of the map to the opposite corner in under 30 s.", 2],
+  ["Tower Run", "Climb from the castle gate to the tower top in under 20 s.", 2],
+  ["Forest Dungeon", "Enter the forest dungeon.", 1],
+  ["Castle Cellar", "Enter the castle dungeon.", 1],
+  ["Cave Diver", "Enter the mountain dungeon.", 1],
+  ["Down the Well", "Enter the village dungeon.", 1],
+  ["Spelunker", "Enter all four dungeons in one trial.", 3],
+  ["King of the Castle", "Stand on top of the castle tower.", 1],
+  ["Summit", "Stand on the highest mountain peak.", 2],
+  ["Tourist", "Visit all four quadrants in one trial.", 1],
+  ["Leap of Faith", "Fall from the tower top without being knocked out.", 1],
+  ["Featherweight", "Glide 30 blocks horizontally in one fall.", 3],
+  ["Moon Jump", "Rise 4 blocks in a single jump.", 2],
+  ["Edge of the World", "Fall off the map.", 1],
+  ["Gravity Wins", "Fall off the map 10 times (lifetime).", 1],
+  ["Platinum Hunter", "Pick up 3 platinum tools in one trial.", 3],
+  ["Treasure Hunter", "Break 5 chests in one trial.", 2],
+  ["Bully", "Knock out 3 AI heroes in one trial.", 2],
+  ["Tyrant", "Knock out 10 AI heroes in one trial.", 3],
+  ["Pickpocket", "Knock 20 powerups out of other heroes in one trial.", 2],
+  ["Minion Mower", "Defeat 25 minions in one trial.", 2],
+  ["Minion Massacre", "Defeat 75 minions in one trial.", 3],
+  ["Slime Time", "Defeat 100 slimes (lifetime).", 1],
+  ["Bat Swatter", "Defeat 100 bats (lifetime).", 2],
+  ["Goblin Bane", "Defeat 100 goblins (lifetime).", 2],
+  ["Bone Breaker", "Defeat 100 skeletons (lifetime).", 2],
+  ["Golem Crusher", "Defeat 50 golems (lifetime).", 3],
+  ["Spore Free", "Defeat 100 mushrooms (lifetime).", 2],
+  ["Sweep", "Hit 5 minions with one swing.", 2],
+  ["Meteor", "Ground-pound a minion after falling 20+ blocks.", 2],
+  ["Comet", "Knock out a hero with a ground pound.", 3],
+  ["Double Tap", "Defeat two minions with one ground pound, one with each hand.", 2],
+  ["Untouchable", "Finish a trial without taking damage.", 3],
+  ["Survivor", "Finish a trial without being knocked out.", 1],
+  ["Dungeon Master", "Defeat every minion in one dungeon in one trial.", 3],
+  ["Giant Killer", "Defeat a level-3 golem with bare hands.", 3],
+  ["Revenge", "Knock out the hero who last knocked you out.", 2],
+  ["Green Thumb", "Break 50 crops in one trial.", 2],
+  ["Timber!", "Break 30 small trees in one trial.", 2],
+  ["Quarry", "Break 30 rocks or boulders in one trial.", 2],
+  ["Clear Cut", "Break 10 props with one swing.", 3],
+  ["Demolition", "Break 200 props in one trial.", 3],
+  ["Pumpkin Smasher", "Break 500 pumpkins (lifetime).", 2],
+  ["Corn Maze", "Break 1,000 corn (lifetime).", 2],
+  ["Gold Rush", "Break a gold block.", 2],
+  ["Crystal Clear", "Break 10 crystals (lifetime).", 2],
+  ["Lucky Dig", "Find 25 dig spots (lifetime).", 3],
+  ["One-Handed", "Win an Ultimate Challenge holding only 1 tool.", 4],
+  ["Barehanded Ultimate", "Win an Ultimate Challenge with no tools.", 4],
+  ["Slowpoke", "Win a challenge with 0 Speed.", 2],
+  ["Glass Cannon", "Win a challenge with 0 Health and 0 Defense.", 3],
+  ["Grounded", "Finish a trial with 0 Jump and never jumping.", 2],
+  ["Pacifist", "Finish a trial without defeating a minion or hitting a hero.", 2],
+  ["Vegetarian", "Finish a trial having broken only crop props.", 2],
+  ["Minimalist", "Win a challenge with 20 or fewer total stats.", 3],
+  ["Underdog", "Win a Battle Royale when every AI hero has more total stats than you.", 3],
+  ["Completionist", "Earn 149 accomplishments.", 4],
+]
+
+// =================================================================== 10. accomplishments (§17, ACCOMPLISHMENTS.md)
+
+// [first, last, name, color] per category
+const ACH_CATS = [[1, 15, 'FIRSTS', 12], [16, 35, 'COLLECTING', 11], [36, 55, 'TOOLS', 9], [56, 80, 'CHALLENGES', 10],
+  [81, 95, 'SPEED', 14], [96, 110, 'EXPLORATION', 13], [111, 130, 'COMBAT', 8], [131, 140, 'HARVESTING', 27], [141, 150, 'ODDITIES', 15]]
+function achCat(n) { for (let c of ACH_CATS) if (n >= c[0] && n <= c[1]) return c }
+
+let L = null                                 // lifetime counters (saved)
+let RUN = null                               // this match's counters
+let earned = []                              // earned[n]: accomplishment n (1-150) is done
+let achQueue = []                            // banners waiting to show
+let strikeCtx = null                         // the player's swing being resolved right now
+
+function freshLife() {
+  return { trials: 0, wins: 0, powerups: 0, broken: 0, chests: 0, kills: 0, heroKOs: 0, pounds: 0, platPicks: 0,
+    hearts: 0, kod: 0, ultTries: 0, falls: 0, digs: 0, ultWins: 0, streak: 0, wrongTool: false, giant: false,
+    kind: {}, mk: {}, toolsHeld: {}, platHeld: {}, wonTypes: {}, bosses: {}, harvestWon: {}, dungeons: {} }
+}
+function freshRun() {
+  return { maxTotal: 0, collectT: [], vacuum: false, preKO: -1, kod: false, toolPicks: 0, firstTwo: [], rightTool: {},
+    whipCollect: 0, digs: 0, chests: 0, platPicks: 0, heroKOs: 0, pickpocket: 0, kills: 0, broken: 0, kind: {}, cls: {},
+    damaged: false, hitHero: false, jumped: false, dungeons: {}, quads: {}, flapRun: 0, flapMax: 0, air: null,
+    cornerT: {}, gateT: -1e9, sweep: false, clearCut: false, meteor: false, comet: false, doubleTap: false, poundKills: {},
+    dungeonMaster: false, revenge: false, nemesis: null, towerTop: false, towerRun: false, summit: false, cross: false,
+    leap: false, feather: false, moon: false }
+}
+const cnt = (o) => Object.keys(o).length
+const won = (C, t) => C && C.win && C.types.indexOf(t) >= 0
+const single = (C, t, s) => C && C.win && C.types.length == 1 && C.types[0] == t && C.used < s
+
+// One check per accomplishment, in order. ev: 'tick' (every 15 frames), 'trial' (the trial just ended),
+// 'ch' (a challenge just ended; C describes it). P is the player.
+const ACH = [null,
+  /* 1 */ () => L.trials >= 1, () => L.wins >= 1, () => L.powerups >= 1, () => P().tools[0] && P().tools[1], () => L.broken >= 1,
+  /* 6 */ () => L.chests >= 1, () => L.kills >= 1, () => L.heroKOs >= 1, () => L.pounds >= 1, () => RUN.flapMax >= 180,
+  /* 11 */ () => L.platPicks >= 1, () => L.hearts >= 1, () => cnt(L.dungeons) >= 1, () => L.kod >= 1, () => L.ultTries >= 1,
+  /* 16 */ () => RUN.maxTotal >= 25, () => RUN.maxTotal >= 50, () => RUN.maxTotal >= 100, () => RUN.maxTotal >= 150,
+  /* 20 */ ...STATS.map((s) => () => P().stats[s] >= 30),
+  /* 28 */ () => STATS.every((s) => P().stats[s] >= 8), () => STATS.every((s) => P().stats[s] >= 15),
+  /* 30 */ () => STATS.some((s) => P().stats[s] >= 20 && STATS.every((t) => t == s || P().stats[t] <= 3)),
+  /* 31 */ () => L.powerups >= 100, () => L.powerups >= 1000, () => L.powerups >= 10000, () => RUN.vacuum,
+  /* 35 */ (ev) => ev == 'trial' && RUN.kod && totalStats(P()) > RUN.preKO,
+  /* 36 */ ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map((t) => (ev, C) => C && C.win && C.tools.indexOf(t) >= 0),
+  /* 45 */ (ev, C) => C && C.win && C.tools.length == 0,
+  /* 46 */ () => P().tools[0] && P().tools[1] && P().tools[0].t == P().tools[1].t,
+  /* 47 */ () => P().tools[0] && P().tools[1] && P().tools[0].plat && P().tools[1].plat,
+  /* 48 */ () => cnt(L.toolsHeld) >= 9, () => cnt(L.platHeld) >= 6, () => RUN.toolPicks >= 10,
+  /* 51 */ (ev) => ev == 'trial' && RUN.firstTwo.length == 2 && RUN.firstTwo.every((t) => P().tools.indexOf(t) >= 0),
+  /* 52 */ () => RUN.rightTool.rock && RUN.rightTool.log && RUN.rightTool.crop, () => L.wrongTool, () => RUN.whipCollect >= 50, () => RUN.digs >= 5,
+  /* 56 */ ...['boss', 'harvest', 'minions', 'royale', 'race'].map((t) => (ev, C) => won(C, t)),
+  /* 61 */ () => cnt(L.wonTypes) >= 5, () => L.ultWins >= 1, () => L.ultWins >= 5, () => L.ultWins >= 25,
+  /* 65 */ ...[7, 5, 6, 8, 9, 10].map((v) => () => L.bosses[v]), () => cnt(L.bosses) >= 6,
+  /* 72 */ ...['wood', 'crop', 'stone'].map((c) => () => L.harvestWon[c]), () => L.streak >= 3, () => L.streak >= 10,
+  /* 77 */ (ev, C) => C && C.win && C.left < 60, (ev, C) => C && C.win && C.hpFrac < 0.1,
+  /* 79 */ (ev, C) => C && C.win && C.ult && C.types.indexOf('royale') >= 0,
+  /* 80 */ (ev, C) => C && C.win && C.ult && ['boss', 'minions', 'royale'].every((t) => C.types.indexOf(t) >= 0),
+  /* 81 */ (ev, C) => single(C, 'boss', 45), (ev, C) => single(C, 'boss', 20), (ev, C) => won(C, 'boss') && C.bossHits == 1,
+  /* 84 */ (ev, C) => single(C, 'harvest', 45), (ev, C) => single(C, 'harvest', 20), (ev, C) => single(C, 'minions', 45),
+  /* 87 */ (ev, C) => single(C, 'minions', 20), (ev, C) => single(C, 'royale', 45), (ev, C) => single(C, 'royale', 20),
+  /* 90 */ (ev, C) => single(C, 'race', 45), (ev, C) => single(C, 'race', 25),
+  /* 92 */ (ev, C) => C && C.win && C.ult && C.used < 75, (ev, C) => C && C.win && C.ult && C.used < 60,
+  /* 94 */ () => RUN.cross, () => RUN.towerRun,
+  /* 96 */ () => L.dungeons[0], () => L.dungeons[1], () => L.dungeons[3], () => L.dungeons[2], () => cnt(RUN.dungeons) >= 4,
+  /* 101 */ () => RUN.towerTop, () => RUN.summit, () => cnt(RUN.quads) >= 4, () => RUN.leap, () => RUN.feather, () => RUN.moon,
+  /* 107 */ () => L.falls >= 1, () => L.falls >= 10, () => RUN.platPicks >= 3, () => RUN.chests >= 5,
+  /* 111 */ () => RUN.heroKOs >= 3, () => RUN.heroKOs >= 10, () => RUN.pickpocket >= 20, () => RUN.kills >= 25, () => RUN.kills >= 75,
+  /* 116 */ () => (L.mk[5] || 0) >= 100, () => (L.mk[6] || 0) >= 100, () => (L.mk[7] || 0) >= 100, () => (L.mk[8] || 0) >= 100,
+  /* 120 */ () => (L.mk[9] || 0) >= 50, () => (L.mk[10] || 0) >= 100,
+  /* 122 */ () => RUN.sweep, () => RUN.meteor, () => RUN.comet, () => RUN.doubleTap,
+  /* 126 */ (ev) => ev == 'trial' && !RUN.damaged, (ev) => ev == 'trial' && !RUN.kod, () => RUN.dungeonMaster, () => L.giant, () => RUN.revenge,
+  /* 131 */ () => (RUN.cls.crop || 0) >= 50, () => (RUN.kind.tree || 0) >= 30, () => (RUN.kind.rock || 0) + (RUN.kind.boulder || 0) >= 30,
+  /* 134 */ () => RUN.clearCut, () => RUN.broken >= 200, () => (L.kind.pumpkin || 0) >= 500, () => (L.kind.corn || 0) >= 1000,
+  /* 138 */ () => (L.kind.goldblk || 0) >= 1, () => (L.kind.crystal || 0) >= 10, () => L.digs >= 25,
+  /* 141 */ (ev, C) => C && C.win && C.ult && C.tools.length == 1, (ev, C) => C && C.win && C.ult && C.tools.length == 0,
+  /* 143 */ (ev, C) => C && C.win && C.base.speed == 0, (ev, C) => C && C.win && C.base.health == 0 && C.base.defense == 0,
+  /* 145 */ (ev) => ev == 'trial' && P().stats.jump == 0 && !RUN.jumped,
+  /* 146 */ (ev) => ev == 'trial' && RUN.kills == 0 && !RUN.hitHero,
+  /* 147 */ (ev) => ev == 'trial' && RUN.broken > 0 && RUN.broken == (RUN.cls.crop || 0),
+  /* 148 */ (ev, C) => C && C.win && C.total <= 20, (ev, C) => won(C, 'royale') && C.underdog,
+  /* 150 */ () => achCount() >= 149,
+]
+const P = () => player
+
+function achCount() { let n = 0; for (let i = 1; i <= 150; i++) if (earned[i]) n++; return n }
+
+function achCheck(ev, C) {
+  let got = false
+  for (let n = 1; n <= 150; n++) {
+    if (earned[n] || !ACH[n](ev, C)) continue
+    earned[n] = true; achQueue.push({ n }); got = true
+  }
+  if (got) saveAll()
+}
+
+function saveAll() {
+  let bits = ''
+  for (let n = 1; n <= 150; n++) bits += earned[n] ? '1' : '0'
+  save({ bests, ach: bits, life: L })
+}
+
+// ---- event hooks (called from the game code)
+
+function achBreak(p) {
+  let k = PROPS[p.kind], t = strikeCtx ? strikeCtx.t : -1
+  L.broken++; RUN.broken++
+  L.kind[p.kind] = (L.kind[p.kind] || 0) + 1; RUN.kind[p.kind] = (RUN.kind[p.kind] || 0) + 1
+  if (k.cls) RUN.cls[k.cls] = (RUN.cls[k.cls] || 0) + 1
+  if (k.chest) { L.chests++; RUN.chests++ }
+  if (p.kind == 'digspot') { L.digs++; RUN.digs++ }
+  if ((p.kind == 'rock' || p.kind == 'boulder') && t == 2) RUN.rightTool.rock = true
+  if ((p.kind == 'log' || p.kind == 'tree') && t == 3) RUN.rightTool.log = true
+  if (k.cls == 'crop' && t == 9) RUN.rightTool.crop = true
+  if (p.kind == 'boulder' && t == 9) L.wrongTool = true
+  if (strikeCtx) strikeCtx.broken++
+}
+
+function achKill(m) {
+  L.kills++; RUN.kills++
+  L.mk[m.v] = (L.mk[m.v] || 0) + 1
+  if (strikeCtx) {
+    if (m.v == 9 && m.lvl >= 3 && strikeCtx.t == 0) L.giant = true
+    if (strikeCtx.pound && strikeCtx.drop >= 20) RUN.meteor = true
+    if (strikeCtx.pound) {
+      let pk = RUN.poundKills[frame] = RUN.poundKills[frame] || {}
+      pk[strikeCtx.k] = true
+      if (pk[0] && pk[1]) RUN.doubleTap = true
+    }
+  }
+  if (m.garrison != null && !minions.some((o) => o.alive && o.garrison == m.garrison)) RUN.dungeonMaster = true
+}
+
+function achKnockOut(h, fell) {
+  if (h === player) {
+    L.kod++; RUN.kod = true
+    RUN.preKO = max(RUN.preKO, totalStats(h))
+    if (fell) L.falls++
+    if (h.lastHitBy && h.lastHitBy.stats && h.lastHitBy !== player) RUN.nemesis = h.lastHitBy
+  } else if (h.lastHitBy === player && !fell) {
+    L.heroKOs++; RUN.heroKOs++
+    if (strikeCtx && strikeCtx.pound) RUN.comet = true
+    if (h === RUN.nemesis) RUN.revenge = true
+  }
+}
+
+function achCollect(q) {
+  if (q.kind == 'heart') { L.hearts++; return }
+  if (q.kind != 'pow') return
+  L.powerups++
+  RUN.collectT.push(frame)
+  while (RUN.collectT.length && RUN.collectT[0] < frame - 180) RUN.collectT.shift()
+  if (RUN.collectT.length >= 10) RUN.vacuum = true
+}
+
+function achTool(tl) {
+  RUN.toolPicks++
+  if (RUN.firstTwo.length < 2) RUN.firstTwo.push(tl)
+  if (tl.plat) { L.platPicks++; RUN.platPicks++; L.platHeld[tl.t] = 1 }
+}
+
+function achChallenge(win) {
+  let C = { win, types: ch.list.map((c) => c.type), ult: ch.list.length > 1, used: ch.used, left: ch.left,
+    tools: player.tools.filter((t) => t).map((t) => t.t), hpFrac: max(0, player.hp) / maxHP(player.stats.health),
+    base: Object.assign({}, player.stats), total: totalStats(player), bossHits: ch.bossHits, underdog: ch.underdog }
+  if (win) {
+    L.wins++; L.streak++
+    for (let c of ch.list) {
+      L.wonTypes[c.type] = 1
+      if (c.type == 'boss') L.bosses[c.v] = 1
+      if (c.type == 'harvest') L.harvestWon[c.cls] = 1
+    }
+    if (C.ult) L.ultWins++
+  } else L.streak = 0
+  achCheck('ch', C)
+}
+
+// every frame of play: where the player is and what they're doing
+function achTick() {
+  let h = player
+  if (h.koT > 0) { RUN.air = null; return }
+  RUN.maxTotal = max(RUN.maxTotal, totalStats(h))
+  for (let tl of h.tools) if (tl) { L.toolsHeld[tl.t] = 1; if (tl.plat) L.platHeld[tl.t] = 1 }
+  let q = quadOf(h.x, h.z)
+  RUN.quads[q] = 1
+  if (h.y < 14) { RUN.dungeons[q] = 1; L.dungeons[q] = 1 }
+  // flapping in one fall
+  if (h.flapping) RUN.flapMax = max(RUN.flapMax, ++RUN.flapRun)
+  else if (h.grounded) RUN.flapRun = 0
+  // a fall or jump: where it started, how high it went, whether you flapped, where it ended
+  if (!h.grounded && !RUN.air) RUN.air = { x: h.x, y: h.y, z: h.z, top: h.y, flap: false, tower: h.y > 49 && h.x > 103 && h.x < 114 && h.z > 85 && h.z < 96 }
+  if (RUN.air) {
+    RUN.air.top = max(RUN.air.top, h.y); RUN.air.flap = RUN.air.flap || h.flapping
+    if (h.grounded) {
+      let a = RUN.air
+      if (a.top - a.y >= 4) RUN.moon = true
+      if (a.flap && dist([a.x, a.z], [h.x, h.z]) >= 30) RUN.feather = true
+      if (a.tower && h.y < 30) RUN.leap = true
+      RUN.air = null
+    }
+  }
+  // corners of the map, for crossing it
+  let c = (h.x < 28 ? 0 : h.x > 100 ? 1 : -9) + (h.z < 28 ? 0 : h.z > 100 ? 2 : -9)
+  if (c >= 0) {
+    RUN.cornerT[c] = frame
+    let opp = 3 - c
+    if (RUN.cornerT[opp] != null && frame - RUN.cornerT[opp] <= 1800) RUN.cross = true
+  }
+  // the castle gate, the tower top and the summit
+  if (h.x > 98 && h.x < 104 && h.z > 79 && h.z < 85 && h.y > 23) RUN.gateT = frame
+  if (h.grounded && h.y > 49.3 && h.x > 103 && h.x < 114 && h.z > 85 && h.z < 96) {
+    RUN.towerTop = true
+    if (frame - RUN.gateT <= 1200) RUN.towerRun = true
+  }
+  if (SUMMIT && h.grounded && dist([h.x, h.z], [SUMMIT[0], SUMMIT[2]]) < 2 && h.y > SUMMIT[1] - 0.2) RUN.summit = true
+  if (frame % 15 == 0) achCheck('tick')
 }
 
 // =================================================================== drawing
@@ -1322,7 +1755,7 @@ const DRAW_R = 40, DRAW_SMALL = 26        // draw distances: big props, small pr
 function drawProps() {
   drawn = 0
   let [fx, , fz] = dir3(camYaw)
-  let F = state == 'title' ? { x: 64, y: 30, z: 64 } : player   // what the view is centered on
+  let F = state == 'title' || state == 'board' ? { x: 64, y: 30, z: 64 } : player   // what the view is centered on
   let cx = F.x, cz = F.z
   let under = F.y < 14                                    // in a dungeon: surface props are hidden, and the other way round
   let b0x = max(0, flr((cx - DRAW_R) / 8)), b1x = min(15, flr((cx + DRAW_R) / 8))
@@ -1480,10 +1913,56 @@ function drawParticles() {
 function drawTitle() {
   printc('HERO TRIAL', 64, 10, 0, 3)
   printc('a 5-minute roguelike', 104, 7, 0)
-  if (stateT % 60 < 40) printc('press O to start', 170, 7, 0)
-  if (DEBUG) printc('X: quick start (30 s trial)', 186, 6, 0)
-  let keys = Object.keys(bests)
-  if (keys.length) printc('best times saved: ' + keys.length, 210, 6, 0)
+  for (let i = 0; i < TITLE_MENU.length; i++) {
+    let sel = i == titleSel, y = 150 + i * 16
+    printc((sel ? '> ' : '  ') + TITLE_MENU[i] + (sel ? ' <' : '  '), y, sel ? (stateT % 30 < 20 ? 10 : 7) : 6, 0)
+  }
+  printc(achCount() + ' / 150 accomplishments', 214, 6, 0)
+  drawAchPopup()
+}
+
+function drawBoard() {
+  rectfill(0, 0, 255, 255, 0)
+  print('ACCOMPLISHMENTS', 6, 6, 10, -1)
+  let c = achCount() + '/150'
+  print(c, 250 - textw(c), 6, 7, -1)
+  for (let n = 1; n <= 150; n++) {
+    let i = n - 1, x = 13 + (i % 15) * 16, y = 22 + flr(i / 15) * 16, cat = achCat(n)
+    rectfill(x, y, x + 12, y + 12, earned[n] ? cat[3] : 1)
+    if (!earned[n]) rect(x, y, x + 12, y + 12, 5)
+    if (i == boardSel) rect(x - 2, y - 2, x + 14, y + 14, stateT % 20 < 12 ? 7 : 10)
+  }
+  let n = boardSel + 1, [name, desc, stars] = ACH_TEXT[n - 1], cat = achCat(n)
+  rectfill(6, 186, 249, 249, 1)
+  print('#' + n + ' ' + cat[2], 12, 190, cat[3], -1)
+  let st = '*'.repeat(stars)
+  print(st, 244 - textw(st), 190, 10, -1)
+  print(name, 12, 203, 7, -1)
+  let lines = wrapText(desc, 33)
+  for (let j = 0; j < lines.length; j++) print(lines[j], 12, 216 + j * 11, 6, -1)
+  if (earned[n]) print('DONE', 244 - textw('DONE'), 203, 11, -1)
+}
+
+function wrapText(t, w) {
+  let out = [], line = ''
+  for (let word of t.split(' ')) {
+    if ((line + ' ' + word).trim().length > w) { out.push(line); line = word } else line = (line + ' ' + word).trim()
+  }
+  if (line) out.push(line)
+  return out
+}
+
+// the "accomplishment!" banner, shown in any state
+function drawAchPopup() {
+  if (!achQueue.length) return
+  let a = achQueue[0]
+  if (a.t == null) { a.t = 150; sfx(S.chest) }
+  let [name] = ACH_TEXT[a.n - 1], cat = achCat(a.n)
+  rectfill(16, 196, 239, 222, 0)
+  rect(16, 196, 239, 222, cat[3])
+  printc('ACCOMPLISHMENT!', 199, 10, -1)
+  printc(name, 210, 7, -1)
+  if (--a.t <= 0) achQueue.shift()
 }
 
 function drawSelect() {
@@ -1574,10 +2053,10 @@ function drawHud() {
     let x = k == 0 ? 4 : 132, tl = h.tools[k], name = (k == 0 ? 'O ' : 'X ') + (tl ? (tl.plat ? '*' : '') + TOOLS[tl.t].name : 'HAND')
     if (h.near && h.grounded) name = (k == 0 ? 'O ' : 'X ') + 'hold: ' + TOOLS[h.near.tool.t].name
     print(name, x, 232, tl && tl.plat ? 10 : 7, 0)
-    let full = max(1, flr(toolOf(h, k).cd * (1 - 0.02 * stat(h, 'frequency'))))
+    let lock = max(h.cd[0], h.cd[1]), full = max(1, h.cdFull || 1)    // one cooldown locks both hands
     rectfill(x, 244, x + 118, 248, 0)
     if (h.holdT[k] > 0) rectfill(x + 1, 245, x + 1 + flr(116 * h.holdT[k] / PICKUP_HOLD), 247, 10)
-    else rectfill(x + 1, 245, x + 1 + flr(116 * (1 - h.cd[k] / full)), 247, h.cd[k] ? 5 : 12)
+    else rectfill(x + 1, 245, x + 1 + flr(116 * (1 - lock / full)), 247, lock ? 5 : 12)
   }
 
   if (h.koT > 0 && state != 'results') printc('KNOCKED OUT!', 110, 8, 0, 2)
